@@ -1,0 +1,1 @@
+self.create_item(True, checkbox=True)

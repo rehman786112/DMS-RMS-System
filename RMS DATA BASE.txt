@@ -1,0 +1,227 @@
+ ################################################### ADMIN AUTHORITY DATA BASE ###################################
+use dbms;
+
+/*create table  if not exists shop_detail(code int primary key,
+shop_name varchar(20),
+shop_address varchar(50),
+contact varchar(30),
+email varchar(100),
+business_ntn int,
+city varchar(30)
+)*/
+
+
+/*create table if not exists admin_authority(id int primary key unique,
+name varchar(20),
+password varchar(20),
+confirm varchar(20)
+)*/
+
+
+######################################################### EXPENSE DETAIL #########################################
+use dbms;
+-- create table if not exists expense_type(code int auto_increment primary key,
+  -- type varchar(100))
+
+ /*create table if not exists expense_detail(date date,
+ code int primary key auto_increment,
+expense_type varchar(100),
+amount int)*/
+
+
+#################################################### PURCHASE INVOICE ###########################################
+use dbms;
+
+/*CREATE TABLE IF NOT EXISTS purchase_invoice (
+    invoice_no INT AUTO_INCREMENT PRIMARY KEY,
+    invoice_date DATE,
+    payment_mode VARCHAR(100),
+    ven_code INT,
+    ven_name VARCHAR(1000) NOT NULL,
+    ven_address TEXT,
+    date_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    ven_balance DECIMAL(10,2),
+    ven_total_item INT DEFAULT 0,
+    ven_total_carton INT DEFAULT 0,
+    ven_total_pcs INT DEFAULT 0,
+    ven_total_qty INT DEFAULT 0,
+    ven_total_amount DECIMAL(10,2) DEFAULT 0,
+    ven_net_amount DECIMAL(10,2) DEFAULT 0,
+    issue_store VARCHAR(100))
+
+create table if not exists purchase_prd(prd_id int,
+		prd_name varchar(255) not null,prd_ctn int ,prd_pcs int ,
+		prd_qty int not null,prd_bonus int,prd_cost_price  decimal(10,2) not null,prd_per int,
+		prd_dis decimal(10,2),prd_tax decimal(10,2),
+		prd_net decimal(10,2),prd_total decimal(10,2),
+		foreign key(invoice_no) references purchase_invoice(invoice_no) on delete cascade,
+	    prd_pre int,company varchar(100),stock int,ctn_stock int,pcs_stock int,
+        stock_id int auto_increment primary key,invoice_no int)*/
+
+####################################### FOR SALE INVOICE #####################################################
+use dbms;
+
+-- for make sale invoice_data table for store invoice_data
+
+   /*create table if not exists invoice_data(invoice_no int auto_increment primary key,
+    invoice_date date,saleman varchar(100) not null,payment_mode varchar(100),
+    cus_name varchar(1000) not null,
+     cus_address text,date_time timestamp default current_timestamp,cus_balance varchar(1000),
+     cus_total_item int default 00 ,cus_total_carton int default 00,cus_total_pcs int default 00,
+     cus_total_qty int default 00, cus_total_amount int default 00,cus_net_amount int default 00,
+     delivery_man varchar(100),issue_store varchar(100),
+   cus_code int,invoice_profit int)
+                   
+
+-- for make sale invoice prd database table 
+
+   create table if not exists invoice_prd(prd_id int,prd_name varchar(255) not null,
+   prd_ctn int ,prd_pcs int ,prd_qty int not null,prd_bonus int,prd_sale_price  decimal(10,2) not null,
+   prd_per int,prd_dis decimal(10,2),prd_tax decimal(10,2),
+   prd_net decimal(10,2),prd_total decimal(10,2),
+  foreign key(invoice_no) references invoice_data(invoice_no) on delete cascade,prd_pre int,
+  prd_comp varchar(100),prd_profit int,invoice_no int)*/
+
+
+
+
+
+
+
+########################################################## CUSTOMER LADGER #######################################
+use dbms;
+
+/*create table if not exists cus_ledger(
+ledger_date date,
+cus_id int,
+saleman varchar(100),
+reference int,
+discription varchar(200),
+debit  decimal(10,2),
+credit decimal(10,2),
+balance int,
+type varchar(100),
+recovery_id int primary key auto_increment,
+foreign key(invoice_no) references invoice_data(invoice_no)  on delete cascade,
+invoice_no int,status varchar(100)
+)*/
+ 
+
+#################################################3 VENDOR LEDGER ################################################
+
+use dbms;
+
+/*create table if not exists ven_ledger(
+ledger_date date,
+ven_id int,
+reference int,
+discription varchar(200),
+debit  decimal(10,2),
+credit decimal(10,2),
+balance int,
+type varchar(100),
+recovery_id int primary key auto_increment,
+foreign key(invoice_no) references purchase_invoice(invoice_no)  on delete cascade,
+invoice_no int
+)*/
+
+
+
+######################################### FOR AREA ###########################################################
+
+------------------ FOR AREA -------------------------------
+-- create table if not exists area(area_code int primary key unique auto_increment,area_name varchar(30))
+------------------- FOR SUB AREA ------------------------------
+-- create table if not exists sub_area(sub_code int primary key unique,sub_name varchar(100),foreign key(area_code) references area(area_code) on delete  cascade,area_code int)
+
+
+############################################################ For PRODUCTS ###############################
+--------------------- for products --------------------------------------
+create table if not exists prd_data(prd_id int primary key unique,
+prd_name varchar(40),
+prd_comp varchar(40),
+prd_cata varchar(30),
+prd_cart int,
+prd_unit varchar(30),
+prd_cost decimal(10,2),
+prd_sale int,
+prd_order int
+)
+
+------------------------------ FOR COMPANY --------------------------------
+create table if not exists company(comp_name varchar(30),id int primary key unique auto_increment)
+
+------------------------- for catagory --------------------------------------
+create table if not exists catagory(cata varchar(20),id int primary key unique auto_increment)
+
+--------------------------- FOR UNIT ----------------------------------
+create table if not exists unit(unit varchar(20),id int primary key unique auto_increment)
+
+
+################################################### FOR BUSINESS PARTNERS #########################################
+
+------------------------------------------------- FOR CUTOMERS ----------------------------------------
+create table if not exists cus_data(code int primary key unique,name varchar(30),address varchar(50),
+city varchar(50),country varchar(50),Phone varchar(30),email varchar(20),type varchar(50),
+cnic varchar(50),date_col date,ntn varchar(50),sub_area varchar(50),area varchar(50),credit_limit varchar(50)
+)  
+
+-------------------------------FOR CUS_TYPE ------------------------------------
+create table if not exists cus_type(type varchar(30),id int primary key unique auto_increment)
+
+----------------------------------- FOR DELIVERY MAN ----------------------------------
+create table if not exists delivery_man(type varchar(30),id int primary key unique auto_increment)
+
+
+
+
+------------------------------------------------ FOR VENDOR --------------------------------------------
+/*create table if not exists ven_data(code int primary key unique,name varchar(30),address varchar(50),
+city varchar(50),country varchar(50),Phone varchar(30),email varchar(20),type varchar(50),
+cnic varchar(50),date_col date,ntn varchar(50),company varchar(50),credit_limit varchar(50)
+)
+*/
+
+--------------------------------- FOR VEN TYPE ----------------------------------------
+ create table if not exists ven_type(type varchar(30),id int primary key unique auto_increment)
+
+
+
+
+------------------------------------------------ FOR SALEMAN ------------------------------------
+/*create table if not exists sal_data(code int primary key unique,name varchar(30),address varchar(50),
+city varchar(50),country varchar(50),Phone varchar(30),email varchar(20),
+cnic varchar(50),date_col date,ntn varchar(50),company varchar(50),credit_limit varchar(50)
+)
+*/
+
+##############################################3 command for execute file ###################################
+pyinstaller --onefile --windowed --icon  logo.ico --add-data "*.png;." --collect-data "escpos"  login.py     
+  
+
+############################## prd_ledger ############################################################
+        
+/*create table if not exists prd_ledger(date date,prd_id int not null,
+								    description varchar(100),
+                                   stock_id int auto_increment primary key,
+                                   stock_in int,stock_out int,
+                                   remaining_stock int,
+                                   invoice_no int,
+                                   transaction_type enum("Purchase","Sale") Not NUll)*/
+
+-- create table if not exists software_lock(lock_date date,notification_date date)
+insert into software_lock(lock_date,notification_date) values('2026-07-30','2026-07-29')
+
+create table if not exists other_income(description varchar(200),date date,ven_id int,name varchar(100),ven_address varchar(100),income decimal(10,2),invoice_no int,reference int primary key)
+
+ALTER TABLE invoice_data
+ADD COLUMN invoice_per INT NOT NULL DEFAULT 0 after invoice_profit;
+ALTER TABLE invoice_data
+ADD COLUMN builty INT NOT NULL DEFAULT 0 after invoice_per;
+ALTER TABLE invoice_data
+ADD COLUMN percent INT NOT NULL DEFAULT 0 after builty;
+
+
+############################## for another computer ############################################## 
+pyinstaller --onefile --windowed --icon  logo.ico --add-data "*.png;." --collect-data "escpos" --add-data "Fonts\NotoNaskhArabic-Regular.ttf;Fonts" --collect-all reportlab  --collect-all arabic_reshaper login.py   
+                                           
