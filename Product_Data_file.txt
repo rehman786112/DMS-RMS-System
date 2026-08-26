@@ -1,0 +1,31 @@
+################################################################   Prd  Table                       ############################
+
+
+CREATE TABLE IF NOT EXISTS products (
+    prd_id INT AUTO_INCREMENT PRIMARY KEY,
+    prd_code VARCHAR(30) NOT NULL UNIQUE,
+    prd_name VARCHAR(100) NOT NULL,
+    prd_carton_size INT DEFAULT 0,
+    prd_cost_price DECIMAL(10,2) NOT NULL,
+    prd_sale_price DECIMAL(10,2) NOT NULL,
+    prd_reorder INT DEFAULT 10,
+    prd_barcode VARCHAR(80) UNIQUE,
+    prd_is_active BOOLEAN DEFAULT TRUE,
+    prd_company_id INT,
+    prd_cat_id INT
+);
+ALTER TABLE products ADD CONSTRAINT fk_category FOREIGN KEY (prd_cat_id) REFERENCES categories(cat_code);
+ALTER TABLE products ADD CONSTRAINT fk_company FOREIGN KEY (prd_company_id) REFERENCES company_data(company_code);
+
+
+#######################   COMPANY & CATEGORIES DATABASE    ###############
+
+CREATE TABLE IF NOT EXISTS categories (
+    cat_code INT AUTO_INCREMENT PRIMARY KEY,
+    cat_description VARCHAR(100) NOT NULL
+);
+ALTER TABLE categories ADD COLUMN is_active boolean DEFAULT TRUE;
+
+CREATE TABLE IF NOT EXISTS company_data(
+company_code INT AUTO_INCREMENT PRIMARY KEY,
+company_description VARCHAR(100) NOT NULL);

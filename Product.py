@@ -1,3 +1,4 @@
+# products_ui.py
 from PyQt6.QtWidgets import *
 from PyQt6.QtGui import *
 from PyQt6.QtCore import *
@@ -21,29 +22,154 @@ class Products(QMainWindow):
         self._current_product_id = None
         self._selected_row = 0
         self.setup_ui()
+        self.setup_enter_navigation()
+
+    def setup_enter_navigation(self):
+        for widget in self.findChildren(QLineEdit):
+            widget.installEventFilter(self)
+        for widget in self.findChildren(QComboBox):
+            widget.installEventFilter(self)
+        for widget in self.findChildren(QTableView):
+            widget.installEventFilter(self)
+
+    def is_widget_editable(self, widget):
+        if not widget.isEnabled():
+            return False
+        if isinstance(widget, QLineEdit):
+            return not widget.isReadOnly()
+        if isinstance(widget, QComboBox):
+            return widget.isEnabled()
+        return True
+
+    def find_next_editable_widget(self, current_widget):
+        focus_widgets = []
+        for widget in self.findChildren(QWidget):
+            if widget.focusPolicy() != Qt.FocusPolicy.NoFocus:
+                if isinstance(widget, (QLineEdit, QComboBox, QPushButton, QCheckBox)):
+                    focus_widgets.append(widget)
+        
+        focus_widgets.sort(key=lambda w: w.tabOrder(w, w) if hasattr(w, 'tabOrder') else 0)
+        
+        try:
+            current_index = focus_widgets.index(current_widget)
+        except ValueError:
+            return None
+        
+        for i in range(current_index + 1, len(focus_widgets)):
+            next_widget = focus_widgets[i]
+            if self.is_widget_editable(next_widget):
+                return next_widget
+        
+        for i in range(0, current_index):
+            next_widget = focus_widgets[i]
+            if self.is_widget_editable(next_widget):
+                return next_widget
+        
+        return None
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            
+            if isinstance(obj, QLineEdit):
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    if self.is_widget_editable(obj):
+                        next_widget = self.find_next_editable_widget(obj)
+                        if next_widget:
+                            next_widget.setFocus()
+                            if isinstance(next_widget, QLineEdit):
+                                next_widget.selectAll()
+                    return True
+                
+                if obj == self.product_name_search:
+                    row_count = self._search_proxy.rowCount() if hasattr(self, '_search_proxy') else 0
+                    if row_count == 0:
+                        return super().eventFilter(obj, event)
+                    
+                    current_index = self.product_detail_view.currentIndex()
+                    current_row = current_index.row() if current_index.isValid() else -1
+                    
+                    if key == Qt.Key.Key_Up:
+                        new_row = current_row - 1 if current_row > 0 else row_count - 1
+                        self.select_table_row(self.product_detail_view, new_row, self._search_proxy)
+                        return True
+                    elif key == Qt.Key.Key_Down:
+                        new_row = current_row + 1 if current_row < row_count - 1 else 0
+                        self.select_table_row(self.product_detail_view, new_row, self._search_proxy)
+                        return True
+            
+            elif isinstance(obj, QComboBox):
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    if self.is_widget_editable(obj):
+                        next_widget = self.find_next_editable_widget(obj)
+                        if next_widget:
+                            next_widget.setFocus()
+                            if isinstance(next_widget, QLineEdit):
+                                next_widget.selectAll()
+                    return True
+            
+            elif isinstance(obj, QTableView):
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    current_index = obj.currentIndex()
+                    if current_index.isValid() and obj == self.product_detail_view:
+                        self.on_product_select(current_index)
+                    return True
+                
+                if obj == self.product_detail_view:
+                    current_index = obj.currentIndex()
+                    if current_index.isValid():
+                        row = current_index.row()
+                        col = current_index.column()
+                        
+                        if key == Qt.Key.Key_Up:
+                            new_row = max(0, row - 1)
+                            if new_row != row:
+                                obj.setCurrentIndex(obj.model().index(new_row, col))
+                            return True
+                        elif key == Qt.Key.Key_Down:
+                            new_row = min(obj.model().rowCount() - 1, row + 1)
+                            if new_row != row:
+                                obj.setCurrentIndex(obj.model().index(new_row, col))
+                            return True
+            
+            elif isinstance(obj, QPushButton):
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and obj.isEnabled():
+                    obj.click()
+                    return True
+        
+        return super().eventFilter(obj, event)
+
+    def select_table_row(self, table_view, row, proxy_model):
+        if row < 0 or row >= proxy_model.rowCount():
+            return
+        model_index = proxy_model.index(row, 0)
+        if model_index.isValid():
+            table_view.clearSelection()
+            table_view.selectRow(row)
+            table_view.setCurrentIndex(model_index)
+            table_view.scrollTo(model_index, QAbstractItemView.ScrollHint.EnsureVisible)
+            table_view.setFocus()
 
     def setup_ui(self):
         self.setup_window()
-
         self.main_layout = QVBoxLayout()
         self.main_layout.setSpacing(0)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.label_widget = self.Create_headers("PRODUCTS", "MainLabel", '35px')
+        self.label_widget = self.create_header("PRODUCTS", "MainLabel", '35px')
         self.label_widget.setFixedHeight(50)
 
         self.product_main_widget = QWidget()
+        self.product_main_widget.setObjectName("main_products_widget")
         self.product_main_layout = QHBoxLayout(self.product_main_widget)
         self.product_main_layout.setSpacing(0)
         self.product_main_layout.setContentsMargins(10, 5, 5, 10)
-        self.product_main_widget.setObjectName("main_products_widget")
 
         self.product_details()
         self.product_description()
 
         self.main_layout.addWidget(self.label_widget)
         self.main_layout.addWidget(self.product_main_widget)
-
         self.footer_window()
 
         central_widget = QWidget()
@@ -55,6 +181,19 @@ class Products(QMainWindow):
         self.setWindowIcon(QIcon("assets/icons/icon.png"))
         self.setMinimumSize(1500, 900)
 
+    def create_header(self, label_name, object_name, font_size):
+        header = QWidget()
+        header.setObjectName(object_name)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(0)
+
+        label = QLabel(label_name)
+        label.setStyleSheet(f"color:white; font-weight:bold; font-size:{font_size}")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header_layout.addWidget(label)
+        return header
+
     def product_details(self):
         self.product_detail = QWidget()
         self.product_detail.setFixedWidth(400)
@@ -63,34 +202,34 @@ class Products(QMainWindow):
         self.product_detail_layout.setSpacing(0)
 
         self.product_name_search = QLineEdit()
+        self.product_name_search.setPlaceholderText("Search product by name...")
         self.product_name_search.setFixedHeight(35)
         self.product_detail_layout.addWidget(self.product_name_search)
 
-        self.product_detail_label_widget = self.Create_headers("Product Details", "detail-header", '18px')
+        self.product_detail_label_widget = self.create_header("Product Details", "detail-header", '18px')
         self.product_detail_label_widget.setContentsMargins(0, 15, 0, 0)
         self.product_detail_layout.addWidget(self.product_detail_label_widget)
 
         self.product_detail_view = QTableView()
-
         self._search_proxy = QSortFilterProxyModel()
         self._search_proxy.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self._search_proxy.setFilterKeyColumn(-1)
         self.product_name_search.textChanged.connect(self._search_proxy.setFilterFixedString)
 
-        self.view_model = TableModel("SELECT product_id, product_name from products")
+        self.view_model = TableModel("SELECT prd_id, prd_name from products")
         self._search_proxy.setSourceModel(self.view_model)
         self.product_detail_view.setModel(self._search_proxy)
-        self.product_detail_layout.addWidget(self.product_detail_view)
+        self.product_detail_view.setAlternatingRowColors(True)
         self.product_detail_view.verticalHeader().setVisible(False)
         self.product_detail_view.horizontalHeader().setVisible(False)
         self.product_detail_view.setColumnHidden(0, True)
+        self.product_detail_view.setShowGrid(False)
+        self.product_detail_view.doubleClicked.connect(self.on_product_select)
 
         header = self.product_detail_view.horizontalHeader()
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
 
-        self.product_detail_view.setShowGrid(False)
-        self.product_detail_view.doubleClicked.connect(self.on_product_select)
-
+        self.product_detail_layout.addWidget(self.product_detail_view)
         self.product_main_layout.addWidget(self.product_detail)
 
     def product_description(self):
@@ -100,10 +239,10 @@ class Products(QMainWindow):
         self.product_name_widget = QWidget()
         self.product_name_layout = QVBoxLayout(self.product_name_widget)
 
-        self.product_desc_label_widget = self.Create_headers("Product Description", 'MainLabel', '20px')
+        self.product_desc_label_widget = self.create_header("Product Description", 'MainLabel', '20px')
         self.product_desc_label_widget.setFixedSize(200, 30)
 
-        self.p_name_input, self.p_name = self._input_fields("Product Name:")
+        self.p_name_input, self.p_name = self.create_input_field("Product Name:")
         self.p_name.textChanged.connect(self.on_update_product_name)
         self.p_name.setFixedWidth(500)
         self.p_name_input.setObjectName("ProductName")
@@ -111,72 +250,65 @@ class Products(QMainWindow):
         self.product_name_layout.addWidget(self.product_desc_label_widget)
         self.product_name_layout.addWidget(self.p_name_input, alignment=Qt.AlignmentFlag.AlignLeft)
 
-        self.company_widget = QWidget()
-        self.company_widget_layout = QVBoxLayout(self.company_widget)
+        # UPDATED: Category and Company only (removed Group and Gender)
+        self.category_company_widget = QWidget()
+        self.category_company_layout = QVBoxLayout(self.category_company_widget)
 
-        self.company_label = self.Create_headers("Group / Company / Gender / Unit", 'MainLabel', '20px')
-        self.company_label.setFixedSize(320, 30)
+        self.category_company_label = self.create_header("Category / Company", 'MainLabel', '20px')
+        self.category_company_label.setFixedSize(250, 30)
 
-        self.group_input_widget_company = QWidget()
-        self.group_input_layout_company = QGridLayout(self.group_input_widget_company)
+        self.category_company_input_widget = QWidget()
+        self.category_company_input_layout = QGridLayout(self.category_company_input_widget)
 
-        self.group_code, self.group_code_value = self._input_fields("Group")
-        self.group_code_value.textChanged.connect(lambda:self.on_text_change("group"))
-        self.group_name, self.group_name_value = self._input_fields("Name")
-        self.group_name_value.setReadOnly(True)
+        # Category fields (replaces Group)
+        self.category_code, self.category_code_value = self.create_input_field("Category")
+        self.category_code_value.textChanged.connect(lambda: self.on_text_change("category"))
+        self.category_name, self.category_name_value = self.create_input_field("Name")
+        self.category_name_value.setReadOnly(True)
 
-        self.company_code, self.company_code_value = self._input_fields("Company")
-        self.company_code_value.textChanged.connect(lambda:self.on_text_change("company"))
-        self.company_name, self.company_name_value = self._input_fields("Name")
+        # Company fields (kept as is)
+        self.company_code, self.company_code_value = self.create_input_field("Company")
+        self.company_code_value.textChanged.connect(lambda: self.on_text_change("company"))
+        self.company_name, self.company_name_value = self.create_input_field("Name")
         self.company_name_value.setReadOnly(True)
 
-        self.gender_code, self.gender_code_value = self._input_fields("Gender")
-        self.gender_code_value.textChanged.connect(lambda:self.on_text_change("gender"))
-        self.gender_name, self.gender_name_value = self._input_fields("Name")
-        self.gender_name_value.setReadOnly(True)
-
+        # Unit field
         self.unit_widget = QWidget()
         self.unit_widget_layout = QHBoxLayout(self.unit_widget)
         self.unit_widget_layout.addStretch()
         self.unit_widget_layout.setSpacing(10)
 
         self.unit_label = QLabel("Unit")
-        self.unit_label.setStyleSheet("""
-            font-size:16px;
-            font-weight: 700;
-            color: black;
-        """)
-
+        self.unit_label.setStyleSheet("font-size:16px; font-weight: 700; color: black;")
         self.unit = QComboBox()
         self.unit.setFixedWidth(200)
         self.unit.addItems(["PCS"])
         self.unit_widget_layout.addWidget(self.unit_label)
         self.unit_widget_layout.addWidget(self.unit)
 
-        self.pct_hs_code, self.pct_hs_code_value = self._input_fields("PCT / HS Code")
+        # PCT/HS Code
+        self.pct_hs_code, self.pct_hs_code_value = self.create_input_field("PCT / HS Code")
 
-        self.add_group_btn = self.add_new_value_btns()
-        self.add_group_btn.clicked.connect(lambda: self.add_new("Group"))
-        self.add_company_btn = self.add_new_value_btns()
+        # Add buttons for new records
+        self.add_category_btn = self.create_add_button()
+        self.add_category_btn.clicked.connect(lambda: self.add_new("Category"))
+        self.add_company_btn = self.create_add_button()
         self.add_company_btn.clicked.connect(lambda: self.add_new("company"))
-        self.add_gender_btn = self.add_new_value_btns()
-        self.add_gender_btn.clicked.connect(lambda: self.add_new("Gender"))
 
-        self.group_input_layout_company.addWidget(self.group_code, 0, 0)
-        self.group_input_layout_company.addWidget(self.group_name, 0, 1)
-        self.group_input_layout_company.addWidget(self.add_group_btn, 0, 2)
-        self.group_input_layout_company.addWidget(self.company_code, 1, 0)
-        self.group_input_layout_company.addWidget(self.company_name, 1, 1)
-        self.group_input_layout_company.addWidget(self.add_company_btn, 1, 2)
-        self.group_input_layout_company.addWidget(self.gender_code, 2, 0)
-        self.group_input_layout_company.addWidget(self.gender_name, 2, 1)
-        self.group_input_layout_company.addWidget(self.add_gender_btn, 2, 2)
-        self.group_input_layout_company.addWidget(self.unit_widget, 3, 0)
-        self.group_input_layout_company.addWidget(self.pct_hs_code, 3, 1)
+        # Layout for category and company
+        self.category_company_input_layout.addWidget(self.category_code, 0, 0)
+        self.category_company_input_layout.addWidget(self.category_name, 0, 1)
+        self.category_company_input_layout.addWidget(self.add_category_btn, 0, 2)
+        self.category_company_input_layout.addWidget(self.company_code, 1, 0)
+        self.category_company_input_layout.addWidget(self.company_name, 1, 1)
+        self.category_company_input_layout.addWidget(self.add_company_btn, 1, 2)
+        self.category_company_input_layout.addWidget(self.unit_widget, 2, 0)
+        self.category_company_input_layout.addWidget(self.pct_hs_code, 2, 1)
 
-        self.company_widget_layout.addWidget(self.company_label)
-        self.company_widget_layout.addWidget(self.group_input_widget_company, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.category_company_layout.addWidget(self.category_company_label)
+        self.category_company_layout.addWidget(self.category_company_input_widget, alignment=Qt.AlignmentFlag.AlignLeft)
 
+        # Product edit table view
         self.product_edit_view = QTableView()
         self.product_edit_model = QStandardItemModel(1, 9)
         self.product_edit_model.setHorizontalHeaderLabels([
@@ -196,111 +328,12 @@ class Products(QMainWindow):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
         self.product_desc_layout.addWidget(self.product_name_widget)
-        self.product_desc_layout.addWidget(self.company_widget)
+        self.product_desc_layout.addWidget(self.category_company_widget)
         self.product_desc_layout.addWidget(self.product_edit_view)
 
         self.product_main_layout.addWidget(self.product_desc)
 
-    def footer_window(self):
-        self.footer_widget = QWidget()
-        self.footer_widget.setFixedHeight(80)
-        self.footer_widget.setObjectName("footerWidget")
-        self.footer_layout = QHBoxLayout(self.footer_widget)
-        self.footer_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.footer_detail_widget = QWidget()
-        self.footer_detail_layout = QVBoxLayout(self.footer_detail_widget)
-        self.footer_detail_layout.setSpacing(10)
-
-        self.footer_short_keys_header = QLabel("Short Keys")
-        self.footer_short_keys_header.setStyleSheet("font-size:15px; font-weight:bold;")
-
-        self.footer_detail_header = QLabel("Select Row And Press Delete Button For Deleting Row")
-        self.footer_detail_header.setStyleSheet("font-size:15px;")
-
-        self.footer_detail_layout.addWidget(self.footer_short_keys_header)
-        self.footer_detail_layout.addWidget(self.footer_detail_header)
-
-        self.buttons_widget_footer = QWidget()
-        self.buttons_widget_footer.setFixedWidth(300)
-        self.buttons_layout_footer = QGridLayout(self.buttons_widget_footer)
-        self.buttons_layout_footer.setSpacing(5)
-        self.buttons_layout_footer.setContentsMargins(10, 5, 10, 5)
-
-        self.btn_cursor = Qt.CursorShape.PointingHandCursor
-
-        self.footer_save_btn = QPushButton("Save")
-        self.footer_save_btn.setFixedSize(90, 35)
-        self.footer_save_btn.setCursor(self.btn_cursor)
-        self.save_shortcut = QShortcut(QKeySequence("Ctrl+s"),self)
-        self.save_shortcut.activated.connect(self.save_data)
-        self.footer_save_btn.clicked.connect(self.save_data)
-        self.footer_save_btn.setObjectName("savebtn")
-
-        self.footer_refresh_btn = QPushButton("Refresh")
-        self.footer_refresh_btn.setFixedSize(90, 35)
-        self.footer_refresh_btn.setCursor(self.btn_cursor)
-        self.refresh_shortcut = QShortcut(QKeySequence("Ctrl+r"),self)
-        self.refresh_shortcut.activated.connect(self.refresh_view)
-        self.footer_refresh_btn.setObjectName("refreshbtn")
-        self.footer_refresh_btn.clicked.connect(self.refresh_view)
-
-        self.footer_delete_btn = QPushButton("Delete")
-        self.footer_delete_btn.setFixedSize(90, 35)
-        self.delete_shortcut = QShortcut(QKeySequence("Ctrl+d"),self)
-        self.delete_shortcut.activated.connect(self.delete_product)
-        self.footer_delete_btn.clicked.connect(self.delete_product)
-        self.footer_delete_btn.setCursor(self.btn_cursor)
-        self.footer_delete_btn.setObjectName("deletebtn")
-
-        self.footer_save_action = QLabel("CTRL + S")
-        self.footer_refresh_action = QLabel("CTRL + R")
-        self.footer_delete_action = QLabel("CTRL + D")
-
-        self.buttons_layout_footer.addWidget(self.footer_save_btn, 0, 0)
-        self.buttons_layout_footer.addWidget(self.footer_refresh_btn, 0, 1)
-        self.buttons_layout_footer.addWidget(self.footer_delete_btn, 0, 2)
-        self.buttons_layout_footer.addWidget(self.footer_save_action, 1, 0, alignment=Qt.AlignmentFlag.AlignCenter)
-        self.buttons_layout_footer.addWidget(self.footer_refresh_action, 1, 1, alignment=Qt.AlignmentFlag.AlignCenter)
-        self.buttons_layout_footer.addWidget(self.footer_delete_action, 1, 2, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        self.footer_layout.addWidget(self.footer_detail_widget)
-        self.footer_layout.addWidget(self.buttons_widget_footer)
-
-        self.main_layout.addWidget(self.footer_widget)
-
-    def add_new_value_btns(self):
-        button = QPushButton("+")
-        button.setObjectName("add_btn")
-        button.setFixedSize(30, 30)
-        button.setCursor(Qt.CursorShape.PointingHandCursor)
-        return button
-    def on_update_product_name(self):
-        item = self.product_edit_model.item(0,2)
-        if item == None:
-            item = self.create_item("")
-            self.product_edit_model.setItem(0,2,item)
-        text = self.p_name.text()
-        item.setText(text)
-    def Create_headers(self, label_name, object_name_widget, font_size):
-        header = QWidget()
-        header.setObjectName(object_name_widget)
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(0)
-
-        label = QLabel(label_name)
-        label.setStyleSheet(f"""
-            color:white;
-            font-weight:bold;
-            font-size:{font_size}
-        """)
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        header_layout.addWidget(label)
-
-        return header
-
-    def _input_fields(self, label_name):
+    def create_input_field(self, label_name):
         input_widget = QWidget()
         input_widget_layout = QHBoxLayout(input_widget)
         input_widget_layout.setSpacing(10)
@@ -319,9 +352,86 @@ class Products(QMainWindow):
 
         return input_widget, line_edit
 
-    def add_new(self, _name):
-        self.add_widget = AddDetails(_name)
-        self.add_widget.show()
+    def create_add_button(self):
+        button = QPushButton("+")
+        button.setObjectName("add_btn")
+        button.setFixedSize(30, 30)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        return button
+
+    def footer_window(self):
+        self.footer_widget = QWidget()
+        self.footer_widget.setFixedHeight(80)
+        self.footer_widget.setObjectName("footerWidget")
+        self.footer_layout = QHBoxLayout(self.footer_widget)
+        self.footer_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.footer_detail_widget = QWidget()
+        self.footer_detail_layout = QVBoxLayout(self.footer_detail_widget)
+        self.footer_detail_layout.setSpacing(10)
+
+        self.footer_short_keys_header = QLabel("Short Keys")
+        self.footer_short_keys_header.setStyleSheet("font-size:15px; font-weight:bold; color: white;")
+        self.footer_detail_layout.addWidget(self.footer_short_keys_header)
+
+        self.footer_detail_header = QLabel("Select Row And Press Delete Button For Deleting Row")
+        self.footer_detail_header.setStyleSheet("font-size:15px; color: white;")
+        self.footer_detail_layout.addWidget(self.footer_detail_header)
+
+        self.buttons_widget_footer = QWidget()
+        self.buttons_widget_footer.setFixedWidth(300)
+        self.buttons_layout_footer = QGridLayout(self.buttons_widget_footer)
+        self.buttons_layout_footer.setSpacing(5)
+        self.buttons_layout_footer.setContentsMargins(10, 5, 10, 5)
+
+        self.btn_cursor = Qt.CursorShape.PointingHandCursor
+
+        self.footer_save_btn = QPushButton("Save")
+        self.footer_save_btn.setFixedSize(90, 35)
+        self.footer_save_btn.setCursor(self.btn_cursor)
+        self.footer_save_btn.setObjectName("savebtn")
+        self.footer_save_btn.clicked.connect(self.save_data)
+        QShortcut(QKeySequence("Ctrl+s"), self).activated.connect(self.save_data)
+
+        self.footer_refresh_btn = QPushButton("Refresh")
+        self.footer_refresh_btn.setFixedSize(90, 35)
+        self.footer_refresh_btn.setCursor(self.btn_cursor)
+        self.footer_refresh_btn.setObjectName("refreshbtn")
+        self.footer_refresh_btn.clicked.connect(self.refresh_view)
+        QShortcut(QKeySequence("Ctrl+r"), self).activated.connect(self.refresh_view)
+
+        self.footer_delete_btn = QPushButton("Delete")
+        self.footer_delete_btn.setFixedSize(90, 35)
+        self.footer_delete_btn.setCursor(self.btn_cursor)
+        self.footer_delete_btn.setObjectName("deletebtn")
+        self.footer_delete_btn.clicked.connect(self.delete_product)
+        QShortcut(QKeySequence("Ctrl+d"), self).activated.connect(self.delete_product)
+
+        self.footer_save_action = QLabel("CTRL + S")
+        self.footer_refresh_action = QLabel("CTRL + R")
+        self.footer_delete_action = QLabel("CTRL + D")
+        self.footer_save_action.setStyleSheet("color: white;")
+        self.footer_refresh_action.setStyleSheet("color: white;")
+        self.footer_delete_action.setStyleSheet("color: white;")
+
+        self.buttons_layout_footer.addWidget(self.footer_save_btn, 0, 0)
+        self.buttons_layout_footer.addWidget(self.footer_refresh_btn, 0, 1)
+        self.buttons_layout_footer.addWidget(self.footer_delete_btn, 0, 2)
+        self.buttons_layout_footer.addWidget(self.footer_save_action, 1, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.buttons_layout_footer.addWidget(self.footer_refresh_action, 1, 1, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.buttons_layout_footer.addWidget(self.footer_delete_action, 1, 2, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.footer_layout.addWidget(self.footer_detail_widget)
+        self.footer_layout.addWidget(self.buttons_widget_footer)
+
+        self.main_layout.addWidget(self.footer_widget)
+
+    def on_update_product_name(self):
+        item = self.product_edit_model.item(0, 2)
+        if item is None:
+            item = self.create_item("")
+            self.product_edit_model.setItem(0, 2, item)
+        item.setText(self.p_name.text())
 
     def create_item(self, value, readonly=False, checkbox=False):
         item = QStandardItem()
@@ -404,79 +514,98 @@ class Products(QMainWindow):
             return
 
         try:
-            company_id = product_company_data.get('company_id')
+            # UPDATED: Get category and company data
+            category_id = product_company_data.get('prd_cat_id')
+            category_name = product_company_data.get('cat_description', '')
+            company_id = product_company_data.get('prd_company_id')
             company_name = product_company_data.get('company_description', '')
-            group_id = product_company_data.get('group_id')
-            group_name = product_company_data.get('group_description', '')
 
+            self.category_code_value.setText(str(category_id) if category_id is not None else "")
+            self.category_name_value.setText(category_name)
             self.company_code_value.setText(str(company_id) if company_id is not None else "")
             self.company_name_value.setText(company_name)
-            self.group_code_value.setText(str(group_id) if group_id is not None else "")
-            self.group_name_value.setText(group_name)
         except Exception:
             QMessageBox.critical(self, "Error", "Error loading product in edit view.")
             return
 
         self._current_product_id = product_id
-        self.p_name.setText(product_data.get("product_name", ""))
+        self.p_name.setText(product_data.get("prd_name", ""))
 
-        columns = [
-            "product_id",
-            "product_code",
-            "product_name",
-            "carton_size",
-            "unit_cost_price",
-            "unit_sale_price",
-            "re_order",
-            "barcode",
-            "is_active",
-        ]
+        columns = ["prd_id", "prd_code", "prd_name", "prd_carton_size",
+                   "prd_cost_price", "prd_sale_price", "prd_reorder", "prd_barcode", "prd_is_active"]
 
         for col, key in enumerate(columns):
             value = product_data.get(key)
-            if key == "product_id":
+            if key == "prd_id":
                 item = self.create_item(value, readonly=True)
-            elif key == "is_active":
+            elif key == "prd_is_active":
                 item = self.create_item(value, checkbox=True)
-            elif key == "product_name":
-                item = self.create_item(value,readonly=True)
+            elif key == "prd_name":
+                item = self.create_item(value, readonly=True)
             else:
                 item = self.create_item(value)
             self.product_edit_model.setItem(0, col, item)
+
     def delete_product(self):
-        if self._current_product_id == None:
-            QMessageBox.information(self,"Message","Please Double click on row to select for Actions")
-        else:
-            reply = QMessageBox.question(self,"Confirm","Are You Sure to Delete this Product?",QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            if reply == QMessageBox.StandardButton.Yes:
-                del_res = db.delete_products(self._current_product_id)
-                if del_res:
-                    QMessageBox.information(self,"Success","Product Delete Success...")
-                    self.refresh_view()
-                else:
-                    QMessageBox.critical(self,"Error","Unable to delete Record...")
-                    self.refresh_view()
+        if self._current_product_id is None:
+            QMessageBox.information(self, "Message", "Please Double click on row to select for Actions")
+            return
+
+        reply = QMessageBox.question(self, "Confirm", "Are You Sure to Delete this Product?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            del_res = db.delete_products(self._current_product_id)
+            if del_res:
+                QMessageBox.information(self, "Success", "Product Delete Success...")
+                self.refresh_view()
             else:
-                return
+                QMessageBox.critical(self, "Error", "Unable to delete Record...")
+                self.refresh_view()
+
     def refresh_view(self):
         self.p_name.setText("")
+        self.category_name_value.setText("")
+        self.category_code_value.setText("")
         self.company_name_value.setText("")
         self.company_code_value.setText("")
-        self.group_name_value.setText("")
-        self.group_code_value.setText("")
-        self.gender_name_value.setText("")
-        self.gender_code_value.setText("")
+        
         for col in range(self.product_edit_model.columnCount()):
             if col == 0:
-                item = self.create_item(None,readonly=True)
+                item = self.create_item(None, readonly=True)
             elif col == 2:
-                item = self.create_item(None,readonly=True)
+                item = self.create_item(None, readonly=True)
             elif col == 8:
-                item = self.create_item(True,checkbox=True)
+                item = self.create_item(True, checkbox=True)
             else:
                 item = self.create_item(None)
-            self.product_edit_model.setItem(0,col,item)
-        self.view_model._load_data("SELECT product_id, product_name from products")
+            self.product_edit_model.setItem(0, col, item)
+        
+        self.view_model._load_data("SELECT prd_id, prd_name from products")
+        self.p_name.setFocus()  # Set focus to product name input after refresh
+
+    def clear_all_inputs(self):
+        """Clear all input fields and reset form"""
+        self.p_name.setText("")
+        self.category_code_value.setText("")
+        self.category_name_value.setText("")
+        self.company_code_value.setText("")
+        self.company_name_value.setText("")
+        self.pct_hs_code_value.setText("")
+        
+        # Clear the edit table
+        for col in range(self.product_edit_model.columnCount()):
+            if col == 0:
+                item = self.create_item(None, readonly=True)
+            elif col == 2:
+                item = self.create_item(None, readonly=True)
+            elif col == 8:
+                item = self.create_item(True, checkbox=True)
+            else:
+                item = self.create_item(None)
+            self.product_edit_model.setItem(0, col, item)
+        
+        self._current_product_id = None
+        self.p_name.setFocus()  # Focus on product name
 
     def save_data(self):
         if self._is_saving:
@@ -490,11 +619,7 @@ class Products(QMainWindow):
             row_data = []
             for col in range(self.product_edit_model.columnCount()):
                 item = self.product_edit_model.item(0, col)
-                if item:
-                    value = self.get_typed_value(item)
-                    row_data.append(value)
-                else:
-                    row_data.append(None)
+                row_data.append(self.get_typed_value(item) if item else None)
 
             product_id = row_data[0]
             product_code = str(row_data[1] or "").strip()
@@ -514,11 +639,12 @@ class Products(QMainWindow):
                 QMessageBox.warning(self, "Validation Error", "Product Code is required.")
                 return
 
-            group_id_text = self.group_code_value.text().strip()
+            # UPDATED: Get category and company IDs
+            category_id_text = self.category_code_value.text().strip()
             company_id_text = self.company_code_value.text().strip()
 
-            if not group_id_text:
-                QMessageBox.warning(self, "Validation Error", "Please select a Group.")
+            if not category_id_text:
+                QMessageBox.warning(self, "Validation Error", "Please select a Category.")
                 return
 
             if not company_id_text:
@@ -526,12 +652,13 @@ class Products(QMainWindow):
                 return
 
             try:
-                group_id = int(group_id_text)
+                category_id = int(category_id_text)
                 company_id = int(company_id_text)
             except ValueError:
-                QMessageBox.warning(self, "Validation Error", "Invalid Group or Company ID.")
+                QMessageBox.warning(self, "Validation Error", "Invalid Category or Company ID.")
                 return
 
+            # Validate numeric fields
             if carton_size is not None:
                 try:
                     carton_size = int(carton_size)
@@ -575,167 +702,216 @@ class Products(QMainWindow):
             if barcode and not barcode.strip():
                 barcode = None
 
+            # UPDATED: Save with category_id instead of group_id
             save_res = db.save_update_insert_product(
-                product_id,
-                product_code,
-                product_name,
-                carton_size,
-                unit_cost_price,
-                unit_sale_price,
-                re_order,
-                barcode,
-                is_active,
-                group_id,
-                company_id
+                product_id, product_code, product_name, carton_size,
+                unit_cost_price, unit_sale_price, re_order, barcode,
+                is_active, category_id, company_id
             )
 
             if save_res.get('success'):
                 QMessageBox.information(self, "Success", "Data saved successfully.")
-                self.view_model._load_data("SELECT product_id, product_name from products")
-                self._current_product_id = None
-                if product_id is None and save_res.get('lastrowid'):
-                    new_id = save_res.get('lastrowid')
-                    self.product_edit_model.setItem(0, 0, self.create_item(new_id, readonly=True))
+                self.view_model._load_data("SELECT prd_id, prd_name from products")
+                self.clear_all_inputs()  # Clear all inputs after successful save
             else:
                 error_msg = save_res.get('message', 'Unknown error')
                 if save_res.get('error') == 'DUPLICATE_ENTRY':
                     QMessageBox.warning(self, "Duplicate Error", "Product Code or Barcode already exists.")
                 elif save_res.get('error') == 'FOREIGN_KEY_VIOLATION':
-                    QMessageBox.warning(self, "Reference Error", "Invalid Group or Company reference.")
+                    QMessageBox.warning(self, "Reference Error", "Invalid Category or Company reference.")
                 else:
                     QMessageBox.critical(self, "Error", f"Error saving data: {error_msg}")
-    
-        except Exception:
-            QMessageBox.critical(self, "Error", "An unexpected error occurred while saving.")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"An unexpected error occurred: {str(e)}")
         finally:
             self._is_saving = False
             self.footer_save_btn.setDisabled(False)
             self.footer_save_btn.setText("Save")
-    def on_text_change(self,sender_name):
+
+    def on_text_change(self, sender_name):
+        # UPDATED: Handle category and company only
         if sender_name == "company":
             code = self.company_code_value.text()
             if code == " ":
                 self.suggestion_widget = Suggestion(sender_name)
                 self.suggestion_widget.show()
                 self.company_code_value.setText("")
-                self.suggestion_widget.sent_data.connect(lambda data:self.on_receive_data(data,sender_name))
+                self.suggestion_widget.sent_data.connect(lambda data: self.on_receive_data(data, sender_name))
             if code.isdigit():
                 code = int(code)
-                get_company_name = db.get_any_thing("SELECT company_description from company_data where company_code = %s and is_active = True",code)
-                if get_company_name == None:
+                get_company_name = db.get_any_thing(
+                    "SELECT company_description FROM company_data WHERE company_code = %s",
+                    code
+                )
+                if get_company_name is None:
                     self.company_name_value.setText("Invalid Code")
-                    self.company_name_value.setStyleSheet("""border:1px solid red;
-                    color:red;""")
-                    
+                    self.company_name_value.setStyleSheet("border:1px solid red; color:red;")
                 else:
                     self.company_name_value.setText(str(get_company_name['company_description']))
-                    self.company_name_value.setStyleSheet("""border:none;color:grey;""")
+                    self.company_name_value.setStyleSheet("border:none; color:grey;")
             if code == "":
                 self.company_name_value.setText("")
-                self.company_name_value.setStyleSheet("""border:none;color:grey;""")
-        if sender_name == "group":
-            code = self.group_code_value.text()
+                self.company_name_value.setStyleSheet("border:none; color:grey;")
+
+        if sender_name == "category":
+            code = self.category_code_value.text()
             if code == " ":
                 self.suggestion_widget = Suggestion(sender_name)
                 self.suggestion_widget.show()
-                self.group_code_value.setText("")
-                self.suggestion_widget.sent_data.connect(lambda data:self.on_receive_data(data,sender_name))
+                self.category_code_value.setText("")
+                self.suggestion_widget.sent_data.connect(lambda data: self.on_receive_data(data, sender_name))
             if code.isdigit():
                 code = int(code)
-                get_group_name = db.get_any_thing("SELECT group_description FROM Group_data where group_code = %s and is_active = True",code)
-                if get_group_name == None:
-                    self.group_name_value.setText("Invalid Code")
-                    self.group_name_value.setStyleSheet("""border:1px solid red;color:red;""")
+                get_category_name = db.get_any_thing(
+                    "SELECT cat_description FROM categories WHERE cat_code = %s",
+                    code
+                )
+                if get_category_name is None:
+                    self.category_name_value.setText("Invalid Code")
+                    self.category_name_value.setStyleSheet("border:1px solid red; color:red;")
                 else:
-                    self.group_name_value.setText(str(get_group_name['group_description']))
-                    self.group_name_value.setStyleSheet("""border:none;color:grey""")
+                    self.category_name_value.setText(str(get_category_name['cat_description']))
+                    self.category_name_value.setStyleSheet("border:none; color:grey;")
             if code == "":
-                self.group_name_value.setText("")
-                self.group_name_value.setStyleSheet("""border:none;color:grey""")
-        if sender_name == "gender":
-            code = self.gender_code_value.text()
-            if code == " ":
-                self.suggestion_widget = Suggestion(sender_name)
-                self.suggestion_widget.show()
-                self.gender_code_value.setText("")
-                self.suggestion_widget.sent_data.connect(lambda data:self.on_receive_data(data,sender_name))
-            if code.isdigit():
-                code = int(code)
-                get_gender_name = db.get_any_thing("SELECT gender_description from gender_data where gender_code = %s and is_active = true",code)
-                if get_gender_name == None:
-                    self.gender_name_value.setText("Invalid Code")
-                    self.gender_name_value.setStyleSheet("""border:1px solid red;color:red;""")
-                else:
-                    self.gender_name_value.setText(str(get_gender_name['gender_description']))
-                    self.gender_name_value.setStyleSheet("""border:none;color:grey;""")
-        if code == "":
-            self.gender_name_value.setText("")
-            self.gender_name_value.setStyleSheet("""border:none;color:grey;""")
-        
-    def on_receive_data(self,data,sender_name):
-        if sender_name == "group":
-            self.group_code_value.setText(str(data[0]))
-            self.group_name_value.setText(str(data[1]))
-            self.group_name_value.setStyleSheet("""border:none;color:grey""")
+                self.category_name_value.setText("")
+                self.category_name_value.setStyleSheet("border:none; color:grey;")
+
+    def on_receive_data(self, data, sender_name):
+        if sender_name == "category":
+            self.category_code_value.setText(str(data[0]))
+            self.category_name_value.setText(str(data[1]))
+            self.category_name_value.setStyleSheet("border:none; color:grey;")
         if sender_name == "company":
             self.company_code_value.setText(str(data[0]))
             self.company_name_value.setText(str(data[1]))
-            self.company_name_value.setStyleSheet("""border:none;color:grey;""")
-        if sender_name == "gender":
-            self.gender_code_value.setText(str(data[0]))
-            self.group_name_value.setText(str(data[1]))
-            self.gender_name_value.setStyleSheet("""border:none;color:grey;""")
+            self.company_name_value.setStyleSheet("border:none; color:grey;")
         self.suggestion_widget.close()
+
+    def add_new(self, sender_name):
+        self.add_detail_window = AddDetails(sender_name)
+        self.add_detail_window.show()
+
+
 class Suggestion(QWidget):
     sent_data = pyqtSignal(list)
-    def __init__(self,sender_name):
+
+    def __init__(self, sender_name):
         super().__init__()
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
-        self.setFixedSize(600,500)
+        self.setFixedSize(600, 500)
         self.main_layout = QGridLayout(self)
 
         self.close_window_btn = QPushButton("Close")
-        self.close_window_btn.setFixedSize(90,30)
+        self.close_window_btn.setFixedSize(90, 30)
         self.close_window_btn.setObjectName("deletebtn")
         self.close_window_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.close_window_btn.clicked.connect(self.close_window)
         self.close_window_btn.setShortcut("Esc")
 
         self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search...")
+        
+        # UPDATED: Use categories table instead of group_data
         if sender_name == "company":
-            self.data_model = TableModel("SELECT company_code, company_description from company_data WHERE is_active = True")
-        if sender_name == "group":
-            self.data_model = TableModel("SELECT group_code, group_description from Group_data where is_active = True")
-        if sender_name == "gender":
-            self.data_model = TableModel("SELECT gender_code, gender_description from gender_data where is_active = True")
+            self.data_model = TableModel("SELECT company_code, company_description FROM company_data")
+        elif sender_name == "category":
+            self.data_model = TableModel("SELECT cat_code, cat_description FROM categories")
 
         self.proxy = QSortFilterProxyModel()
         self.proxy.setSourceModel(self.data_model)
         self.proxy.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.proxy.setFilterKeyColumn(-1)
+        
         self.table_view = QTableView()
         self.table_view.setModel(self.proxy)
         self.table_view.verticalHeader().setVisible(False)
         self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table_view.clicked.connect(self.on_row_select)
+        
         header = self.table_view.horizontalHeader()
-        header.setSectionResizeMode(1,QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        
         self.search_input.textChanged.connect(self.proxy.setFilterFixedString)
-        self.main_layout.addWidget(self.search_input,0,0)
-        self.main_layout.addWidget(self.close_window_btn,0,1)
-        self.main_layout.addWidget(self.table_view,1,0,1,2)
+        self.search_input.installEventFilter(self)
+        self.table_view.installEventFilter(self)
+
+        self.main_layout.addWidget(self.search_input, 0, 0)
+        self.main_layout.addWidget(self.close_window_btn, 0, 1)
+        self.main_layout.addWidget(self.table_view, 1, 0, 1, 2)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            
+            if obj == self.search_input:
+                row_count = self.proxy.rowCount()
+                if row_count == 0:
+                    return super().eventFilter(obj, event)
+                
+                current_index = self.table_view.currentIndex()
+                current_row = current_index.row() if current_index.isValid() else -1
+                
+                if key == Qt.Key.Key_Up:
+                    new_row = current_row - 1 if current_row > 0 else row_count - 1
+                    self.select_table_row(new_row)
+                    return True
+                elif key == Qt.Key.Key_Down:
+                    new_row = current_row + 1 if current_row < row_count - 1 else 0
+                    self.select_table_row(new_row)
+                    return True
+                elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    if current_index.isValid():
+                        self.on_row_select(current_index)
+                        return True
+            
+            elif obj == self.table_view:
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    current_index = self.table_view.currentIndex()
+                    if current_index.isValid():
+                        self.on_row_select(current_index)
+                        return True
+                elif key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+                    current_index = self.table_view.currentIndex()
+                    if current_index.isValid():
+                        row = current_index.row()
+                        col = current_index.column()
+                        if key == Qt.Key.Key_Up:
+                            new_row = max(0, row - 1)
+                        else:
+                            new_row = min(self.proxy.rowCount() - 1, row + 1)
+                        if new_row != row:
+                            new_index = self.proxy.index(new_row, col)
+                            self.table_view.setCurrentIndex(new_index)
+                            self.table_view.selectRow(new_row)
+                        return True
+        
+        return super().eventFilter(obj, event)
+
+    def select_table_row(self, row):
+        if row < 0 or row >= self.proxy.rowCount():
+            return
+        model_index = self.proxy.index(row, 0)
+        if model_index.isValid():
+            self.table_view.clearSelection()
+            self.table_view.selectRow(row)
+            self.table_view.setCurrentIndex(model_index)
+            self.table_view.scrollTo(model_index, QAbstractItemView.ScrollHint.EnsureVisible)
+            self.table_view.setFocus()
+
     def close_window(self):
         self.close()
-    def on_row_select(self,index):
+
+    def on_row_select(self, index):
         row = index.row()
         row_data = []
         model = self.table_view.model()
         for col in range(model.columnCount()):
-            item = model.index(row,col).data(Qt.ItemDataRole.DisplayRole )
+            item = model.index(row, col).data(Qt.ItemDataRole.DisplayRole)
             if item:
                 row_data.append(item)
-
         self.sent_data.emit(row_data)
+        self.close()
 
 
 class AddDetails(QWidget):
@@ -746,14 +922,14 @@ class AddDetails(QWidget):
         self.setWindowIcon(QIcon("assets/icons/icon.png"))
         self.sender_name = sender_name
         self.company_id = None
-        self.group_id = None
-        self.gender_id = None
+        self.category_id = None  # UPDATED: Replace group_id with category_id
         self.row_data = []
         self._is_saving = False
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
-        self.label = QLabel()
+        
+        self.label = self.create_header(f"{sender_name}", "MainLabel", '25px')
         self.label.setFixedHeight(60)
 
         self._data = QWidget()
@@ -766,7 +942,7 @@ class AddDetails(QWidget):
         self._detail_layout.addStretch()
         self._detail_layout.addSpacing(10)
 
-        self.detail_label_widget = self.Create_headers(f"{sender_name} Details", "MainLabel", '20px')
+        self.detail_label_widget = self.create_header(f"{sender_name} Details", "MainLabel", '20px')
         self.detail_label_widget.setFixedSize(160, 30)
         self._detail_layout.addWidget(self.detail_label_widget)
 
@@ -774,7 +950,7 @@ class AddDetails(QWidget):
         self.is_active_widget.setChecked(True)
         self._detail_layout.addWidget(self.is_active_widget, alignment=Qt.AlignmentFlag.AlignRight)
 
-        self.name_input_widget, self.name_input_value = self._input_fields("Name")
+        self.name_input_widget, self.name_input_value = self.create_input_field("Name")
         self._detail_layout.addWidget(self.name_input_widget)
 
         self.address_input_widget = None
@@ -784,30 +960,27 @@ class AddDetails(QWidget):
         self.short_name_input_widget = None
         self.short_name_value = None
 
+        # UPDATED: Only handle company and category
         if sender_name == 'company':
-            self.label = self.Create_headers("PRODUCT COMPANIES", "MainLabel", '25px')
             self.data_model = TableModel("SELECT * FROM company_data")
-            self.address_input_widget, self.address_input_value = self._input_fields("Address")
-            self.city_input_widget, self.city_input_value = self._input_fields("City")
-            self.short_name_input_widget, self.short_name_value = self._input_fields("Short Name")
+            self.address_input_widget, self.address_input_value = self.create_input_field("Address")
+            self.city_input_widget, self.city_input_value = self.create_input_field("City")
+            self.short_name_input_widget, self.short_name_value = self.create_input_field("Short Name")
             self._detail_layout.addWidget(self.address_input_widget)
             self._detail_layout.addWidget(self.city_input_widget)
             self._detail_layout.addWidget(self.short_name_input_widget)
-
-        elif sender_name == 'Group':
-            self.label = self.Create_headers("PRODUCT GROUP", "MainLabel", '25px')
-            self.data_model = TableModel("SELECT * FROM Group_data")
-
-        elif sender_name == 'Gender':
-            self.label = self.Create_headers("PRODUCT GENDER", "MainLabel", '25px')
-            self.data_model = TableModel("SELECT * FROM gender_data")
+        elif sender_name == 'Category':
+            self.data_model = TableModel("SELECT * FROM categories")
 
         self.existing_data_view = QTableView()
         self.existing_data_view.setWordWrap(True)
+        self.existing_data_view.setAlternatingRowColors(True)
         self.existing_data_view.setModel(self.data_model)
+        
         header = self.existing_data_view.horizontalHeader()
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
         header.setMinimumSectionSize(100)
+        
         self.existing_data_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.existing_data_view.verticalHeader().setVisible(False)
         self.existing_data_view.clicked.connect(self.on_row_click)
@@ -817,6 +990,127 @@ class AddDetails(QWidget):
         self.layout.addWidget(self.label)
         self.layout.addWidget(self._data)
         self.footer_window()
+        self.setup_enter_navigation()
+
+    def create_header(self, label_name, object_name, font_size):
+        header = QWidget()
+        header.setObjectName(object_name)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(0)
+
+        label = QLabel(label_name)
+        label.setStyleSheet(f"color:white; font-weight:bold; font-size:{font_size}")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header_layout.addWidget(label)
+        return header
+
+    def create_input_field(self, label_name):
+        input_widget = QWidget()
+        input_widget_layout = QHBoxLayout(input_widget)
+        input_widget_layout.setSpacing(10)
+        input_widget_layout.setContentsMargins(20, 0, 0, 0)
+        input_widget_layout.addStretch()
+
+        input_label = QLabel(label_name)
+        input_label.setStyleSheet("color:black; font-size:16px; font-weight:700")
+
+        line_edit = QLineEdit()
+        line_edit.setFixedSize(180, 30)
+        line_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        input_widget_layout.addWidget(input_label)
+        input_widget_layout.addWidget(line_edit)
+
+        return input_widget, line_edit
+
+    def setup_enter_navigation(self):
+        for widget in self.findChildren(QLineEdit):
+            widget.installEventFilter(self)
+        for widget in self.findChildren(QComboBox):
+            widget.installEventFilter(self)
+        self.existing_data_view.installEventFilter(self)
+
+    def is_widget_editable(self, widget):
+        if not widget.isEnabled():
+            return False
+        if isinstance(widget, QLineEdit):
+            return not widget.isReadOnly()
+        if isinstance(widget, QComboBox):
+            return widget.isEnabled()
+        return True
+
+    def find_next_editable_widget(self, current_widget):
+        focus_widgets = []
+        for widget in self.findChildren(QWidget):
+            if widget.focusPolicy() != Qt.FocusPolicy.NoFocus:
+                if isinstance(widget, (QLineEdit, QComboBox, QPushButton, QCheckBox)):
+                    focus_widgets.append(widget)
+        
+        focus_widgets.sort(key=lambda w: w.tabOrder(w, w) if hasattr(w, 'tabOrder') else 0)
+        
+        try:
+            current_index = focus_widgets.index(current_widget)
+        except ValueError:
+            return None
+        
+        for i in range(current_index + 1, len(focus_widgets)):
+            next_widget = focus_widgets[i]
+            if self.is_widget_editable(next_widget):
+                return next_widget
+        
+        for i in range(0, current_index):
+            next_widget = focus_widgets[i]
+            if self.is_widget_editable(next_widget):
+                return next_widget
+        
+        return None
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            
+            if isinstance(obj, QLineEdit):
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    if self.is_widget_editable(obj):
+                        next_widget = self.find_next_editable_widget(obj)
+                        if next_widget:
+                            next_widget.setFocus()
+                            if isinstance(next_widget, QLineEdit):
+                                next_widget.selectAll()
+                    return True
+            
+            elif isinstance(obj, QComboBox):
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    if self.is_widget_editable(obj):
+                        next_widget = self.find_next_editable_widget(obj)
+                        if next_widget:
+                            next_widget.setFocus()
+                    return True
+            
+            elif isinstance(obj, QTableView):
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    current_index = obj.currentIndex()
+                    if current_index.isValid():
+                        self.on_row_click(current_index)
+                    return True
+                elif key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+                    current_index = obj.currentIndex()
+                    if current_index.isValid():
+                        row = current_index.row()
+                        col = current_index.column()
+                        model = obj.model()
+                        if key == Qt.Key.Key_Up:
+                            new_row = max(0, row - 1)
+                        else:
+                            new_row = min(model.rowCount() - 1, row + 1)
+                        if new_row != row:
+                            new_index = model.index(new_row, col)
+                            obj.setCurrentIndex(new_index)
+                            obj.selectRow(new_row)
+                        return True
+        
+        return super().eventFilter(obj, event)
 
     def on_row_click(self, index):
         model = self.existing_data_view.model()
@@ -841,19 +1135,11 @@ class AddDetails(QWidget):
                 self.short_name_value.setText(str(self.row_data[4]) if self.row_data[4] is not None else "")
                 active = self.row_data[5] if len(self.row_data) > 5 else 1
                 self.is_active_widget.setChecked(active in (1, True, "1"))
-
-            elif self.sender_name == "Gender":
-                self.gender_id = int(self.row_data[0])
+            elif self.sender_name == "Category":
+                self.category_id = int(self.row_data[0])
                 self.name_input_value.setText(str(self.row_data[1]) if self.row_data[1] is not None else "")
                 active = self.row_data[2] if len(self.row_data) > 2 else 1
                 self.is_active_widget.setChecked(active in (1, True, "1"))
-
-            elif self.sender_name == "Group":
-                self.group_id = int(self.row_data[0])
-                self.name_input_value.setText(str(self.row_data[1]) if self.row_data[1] is not None else "")
-                active = self.row_data[2] if len(self.row_data) > 2 else 1
-                self.is_active_widget.setChecked(active in (1, True, "1"))
-
         except (ValueError, TypeError, IndexError):
             QMessageBox.warning(self, "Error", "Error loading record data.")
 
@@ -878,12 +1164,7 @@ class AddDetails(QWidget):
                 is_active = self.is_active_widget.isChecked()
 
                 save_res = db.save_company_data(
-                    self.company_id,
-                    company_name,
-                    address,
-                    city,
-                    short_name,
-                    is_active
+                    self.company_id, company_name, address, city, short_name, is_active
                 )
 
                 if save_res.get('success'):
@@ -896,14 +1177,14 @@ class AddDetails(QWidget):
                     else:
                         QMessageBox.critical(self, "Error", f"Error saving data: {error_msg}")
 
-            elif self.sender_name == "Group":
-                group_name = self.name_input_value.text().strip()
-                if not group_name:
-                    QMessageBox.warning(self, "Validation Error", "Group Name is required.")
+            elif self.sender_name == "Category":
+                category_name = self.name_input_value.text().strip()
+                if not category_name:
+                    QMessageBox.warning(self, "Validation Error", "Category Name is required.")
                     return
 
                 is_active = self.is_active_widget.isChecked()
-                save_res = db.save_group(self.group_id, group_name, is_active)
+                save_res = db.save_category(self.category_id, category_name, is_active)
 
                 if save_res.get('success'):
                     QMessageBox.information(self, "Success", "Record saved successfully.")
@@ -911,56 +1192,16 @@ class AddDetails(QWidget):
                 else:
                     error_msg = save_res.get('message', 'Unknown error')
                     if save_res.get('error') == 'DUPLICATE_ENTRY':
-                        QMessageBox.warning(self, "Duplicate Error", "Group name already exists.")
+                        QMessageBox.warning(self, "Duplicate Error", "Category name already exists.")
                     else:
                         QMessageBox.critical(self, "Error", f"Error saving data: {error_msg}")
 
-            else:
-                QMessageBox.information(self, "Info", f"Save for {self.sender_name} not implemented.")
-
-        except Exception:
-            QMessageBox.critical(self, "Error", "An unexpected error occurred while saving.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"An unexpected error occurred: {str(e)}")
         finally:
             self._is_saving = False
             self.footer_save_btn.setDisabled(False)
             self.footer_save_btn.setText("Save")
-
-    def _input_fields(self, label_name):
-        input_widget = QWidget()
-        input_widget_layout = QHBoxLayout(input_widget)
-        input_widget_layout.setSpacing(10)
-        input_widget_layout.setContentsMargins(20, 0, 0, 0)
-        input_widget_layout.addStretch()
-
-        input_label = QLabel(label_name)
-        input_label.setStyleSheet("color:black; font-size:16px; font-weight:700")
-
-        line_edit = QLineEdit()
-        line_edit.setFixedSize(180, 30)
-        line_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
-        input_widget_layout.addWidget(input_label)
-        input_widget_layout.addWidget(line_edit)
-
-        return input_widget, line_edit
-
-    def Create_headers(self, label_name, object_name_widget, font_size):
-        header = QWidget()
-        header.setObjectName(object_name_widget)
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(0)
-
-        label = QLabel(label_name)
-        label.setStyleSheet(f"""
-            color:white;
-            font-weight:bold;
-            font-size:{font_size}
-        """)
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        header_layout.addWidget(label)
-
-        return header
 
     def footer_window(self):
         self.footer_widget = QWidget()
@@ -974,12 +1215,11 @@ class AddDetails(QWidget):
         self.footer_detail_layout.setSpacing(10)
 
         self.footer_short_keys_header = QLabel("Short Keys")
-        self.footer_short_keys_header.setStyleSheet("font-size:15px; font-weight:bold;")
+        self.footer_short_keys_header.setStyleSheet("font-size:15px; font-weight:bold; color: white;")
+        self.footer_detail_layout.addWidget(self.footer_short_keys_header)
 
         self.footer_detail_header = QLabel("Double Click On Any Row to Edit Record")
-        self.footer_detail_header.setStyleSheet("font-size:15px;")
-
-        self.footer_detail_layout.addWidget(self.footer_short_keys_header)
+        self.footer_detail_header.setStyleSheet("font-size:15px; color: white;")
         self.footer_detail_layout.addWidget(self.footer_detail_header)
 
         self.buttons_widget_footer = QWidget()
@@ -992,30 +1232,31 @@ class AddDetails(QWidget):
 
         self.footer_save_btn = QPushButton("Save")
         self.footer_save_btn.setFixedSize(90, 35)
-        self.footer_save_btn.clicked.connect(self.save_data)
         self.footer_save_btn.setCursor(self.btn_cursor)
-        self.save_shortcut = QShortcut(QKeySequence("Ctrl+s"),self)
-        self.save_shortcut.activated.connect(self.save_data)
         self.footer_save_btn.setObjectName("savebtn")
+        self.footer_save_btn.clicked.connect(self.save_data)
+        QShortcut(QKeySequence("Ctrl+s"), self).activated.connect(self.save_data)
 
         self.footer_refresh_btn = QPushButton("Refresh")
         self.footer_refresh_btn.setFixedSize(90, 35)
-        self.refresh_shortcut = QShortcut(QKeySequence("Ctrl+r"),self)
-        self.refresh_shortcut.activated.connect(self.refresh_data)
         self.footer_refresh_btn.setCursor(self.btn_cursor)
         self.footer_refresh_btn.setObjectName("refreshbtn")
         self.footer_refresh_btn.clicked.connect(self.refresh_data)
+        QShortcut(QKeySequence("Ctrl+r"), self).activated.connect(self.refresh_data)
 
         self.footer_delete_btn = QPushButton("Close")
         self.footer_delete_btn.setFixedSize(90, 35)
         self.footer_delete_btn.setCursor(self.btn_cursor)
+        self.footer_delete_btn.setObjectName("deletebtn")
         self.footer_delete_btn.clicked.connect(self.closeWindow)
         self.footer_delete_btn.setShortcut("Esc")
-        self.footer_delete_btn.setObjectName("deletebtn")
 
         self.footer_save_action = QLabel("CTRL + S")
         self.footer_refresh_action = QLabel("CTRL + R")
         self.footer_delete_action = QLabel("Esc")
+        self.footer_save_action.setStyleSheet("color: white;")
+        self.footer_refresh_action.setStyleSheet("color: white;")
+        self.footer_delete_action.setStyleSheet("color: white;")
 
         self.buttons_layout_footer.addWidget(self.footer_save_btn, 0, 0)
         self.buttons_layout_footer.addWidget(self.footer_refresh_btn, 0, 1)
@@ -1041,17 +1282,13 @@ class AddDetails(QWidget):
                 self.city_input_value.setText("")
                 self.short_name_value.setText("")
                 self.company_id = None
-            elif self.sender_name == "Group":
-                self.data_model._load_data("SELECT * FROM Group_data")
+            elif self.sender_name == "Category":
+                self.data_model._load_data("SELECT * FROM categories")
                 self.name_input_value.setText("")
-                self.group_id = None
-            elif self.sender_name == "Gender":
-                self.data_model._load_data("SELECT * FROM gender_data")
-                self.name_input_value.setText("")
-                self.gender_id = None
+                self.category_id = None
             self.is_active_widget.setChecked(True)
-        except Exception:
-            QMessageBox.critical(self, "Error", "Error refreshing data.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error refreshing data: {str(e)}")
 
 
 class TableModel(QAbstractTableModel):
@@ -1071,7 +1308,8 @@ class TableModel(QAbstractTableModel):
             else:
                 self._data = result
                 self._headers = list(self._data[0].keys()) if self._data else []
-        except Exception:
+        except Exception as e:
+            print(f"Error loading data: {e}")
             self._data = []
             self._headers = []
         self.endResetModel()

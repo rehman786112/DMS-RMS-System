@@ -1,0 +1,121 @@
+############### Customers Database ################
+
+
+CREATE TABLE IF NOT EXISTS customers (
+    cus_code INT PRIMARY KEY AUTO_INCREMENT,
+    cus_name VARCHAR(100) NOT NULL,
+    cus_email VARCHAR(100) NOT NULL UNIQUE,
+    cus_address VARCHAR(200) NOT NULL,
+    cus_city VARCHAR(100) NOT NULL,
+    cus_country VARCHAR(100) DEFAULT 'Pakistan',
+    cus_type VARCHAR(50),
+    cus_cnic VARCHAR(50),
+    cus_area VARCHAR(100),
+    cus_sub_area VARCHAR(100),
+    cus_credit_limit DECIMAL(10,2) DEFAULT 0,
+    cus_whatsapp VARCHAR(20),
+    phone varchar(100),
+    cus_date DATE DEFAULT (CURRENT_DATE)
+);
+
+================ DESCRIBE Customers =============
+
+cus_code	int	NO	PRI		auto_increment
+cus_name	varchar(100)	NO			
+cus_email	varchar(100)	NO	UNI		
+cus_address	varchar(200)	NO			
+cus_city	varchar(100)	NO	MUL		
+cus_country	varchar(100)	YES		Pakistan	
+cus_type	varchar(50)	YES	MUL		
+cus_cnic	varchar(50)	YES			
+cus_area	varchar(100)	YES	MUL		
+cus_sub_area	varchar(100)	YES	MUL		
+cus_credit_limit	decimal(10,2)	YES	MUL	0.00	
+cus_date	date	YES		curdate()	DEFAULT_GENERATED
+phone	varchar(100)	YES			
+cus_whatsapp	varchar(20)	YES	
+
+
+###########################    VENDORS DATABASE  ########################
+
+CREATE TABLE vendors (
+    vnd_code INT AUTO_INCREMENT PRIMARY KEY,
+    vnd_name VARCHAR(100) NOT NULL,
+    vnd_email VARCHAR(50) UNIQUE,
+    vnd_address VARCHAR(100) NOT NULL,
+    vnd_city VARCHAR(100) NOT NULL,
+    vnd_country VARCHAR(100),
+    vnd_phone VARCHAR(20),
+    vnd_whatsapp VARCHAR(20),
+    vnd_type VARCHAR(50) NOT NULL,
+    vnd_cnic VARCHAR(20) NOT NULL,
+    vnd_date DATE DEFAULT (CURRENT_DATE),
+    vnd_company VARCHAR(50) NOT NULL,
+    vnd_credit_limit DECIMAL(10,2) NOT NULL
+);
+
+====================  DESCRIBE VENDORS  ======================
+
+vnd_code	int	NO	PRI		auto_increment
+vnd_name	varchar(100)	NO			
+vnd_email	varchar(50)	YES	UNI		
+vnd_address	varchar(100)	NO			
+vnd_city	varchar(100)	NO			
+vnd_country	varchar(100)	YES			
+vnd_phone	varchar(20)	YES			
+vnd_whatsapp	varchar(20)	YES			
+vnd_type	varchar(50)	NO			
+vnd_cnic	varchar(20)	NO			
+vnd_date	date	YES		curdate()	DEFAULT_GENERATED
+vnd_company	varchar(50)	NO			
+vnd_credit_limit	decimal(10,2)	NO	
+
+
+############################      SALEMANS DATABASE   #####################
+
+CREATE TABLE salesmen (
+    slm_code INT AUTO_INCREMENT PRIMARY KEY,
+    slm_name VARCHAR(100) NOT NULL,
+    slm_email VARCHAR(50) UNIQUE,
+    slm_address VARCHAR(100) NOT NULL,
+    slm_city VARCHAR(100) NOT NULL,
+    slm_country VARCHAR(100),
+    slm_phone VARCHAR(20),
+    slm_whatsapp VARCHAR(20),
+    slm_type VARCHAR(50) NOT NULL,
+    slm_cnic VARCHAR(20) NOT NULL,
+    slm_date DATE DEFAULT (CURRENT_DATE),
+    slm_company VARCHAR(50) NOT NULL,
+    slm_credit_limit DECIMAL(10,2) NOT NULL
+);
+
+======================  DESCRIBE SALESMEN   ==================== 
+
+slm_code	int	NO	PRI		auto_increment
+slm_name	varchar(100)	NO			
+slm_email	varchar(50)	YES	UNI		
+slm_address	varchar(100)	NO			
+slm_city	varchar(100)	NO			
+slm_country	varchar(100)	YES			
+slm_phone	varchar(20)	YES			
+slm_whatsapp	varchar(20)	YES			
+slm_type	varchar(50)	NO			
+slm_cnic	varchar(20)	NO			
+slm_date	date	YES		curdate()	DEFAULT_GENERATED
+slm_company	varchar(50)	NO			
+slm_credit_limit	decimal(10,2)	NO			
+
+##################    AREA & SUB-AREA DATABASE  ##################
+
+CREATE TABLE IF NOT EXISTS areas (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    area_name VARCHAR(100) NOT NULL UNIQUE
+);
+CREATE TABLE IF NOT EXISTS sub_areas (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    sub_area_name VARCHAR(100) NOT NULL,
+    area_id INT,
+    area_name VARCHAR(100),
+    FOREIGN KEY (area_id) REFERENCES areas(id) ON DELETE CASCADE,
+    FOREIGN KEY (area_name) REFERENCES areas(area_name) ON DELETE CASCADE
+);
