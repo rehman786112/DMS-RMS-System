@@ -954,7 +954,7 @@ class AddDetails(QWidget):
 
         self._detail_widget = QWidget()
         self._detail_widget.setObjectName("input_widget")
-        self._detail_widget.setFixedSize(300, 200)
+        self._detail_widget.setFixedSize(300, 250)
         self._detail_layout = QVBoxLayout(self._detail_widget)
         self._detail_layout.addStretch()
         self._detail_layout.addSpacing(10)
@@ -1163,7 +1163,8 @@ class AddDetails(QWidget):
     def save_data(self):
         if self._is_saving:
             return
-
+        is_update = False
+        message = 'Record Added Success...'
         self._is_saving = True
         try:
             self.footer_save_btn.setText("Saving...")
@@ -1174,20 +1175,28 @@ class AddDetails(QWidget):
                 if not company_name:
                     QMessageBox.warning(self, "Validation Error", "Company Name is required.")
                     return
-
+                print(self.company_id)
+                if self.company_id != None:
+                    is_update = True
+                    message = 'Record Updated Success..'
                 address = self.address_input_value.text().strip() or None
                 city = self.city_input_value.text().strip() or None
                 short_name = self.short_name_value.text().strip() or None
                 is_active = self.is_active_widget.isChecked()
                 try:
                     conn, cursor = db.get_connection()
-                    query = "INSERT INTO company_data (company_id, company_name, address, city, short_name, is_active) VALUES (%s,%s,%s,%s,%s,%s)"
-                    value = (self.company_id, company_name, address, city, short_name, is_active)
+                    if is_update:
+                        query = 'UPDATE company_data SET company_description = %s, city = %s,short_name = %s,is_active = %s WHERE company_code = %s'
+                        value = (company_name,city,short_name,is_active,self.company_id)
+                    else:
+                        query = "INSERT INTO company_data ( company_description, address, city, short_name, is_active) VALUES (%s,%s,%s,%s,%s,%s)"
+                        value = (company_name, address, city, short_name, is_active)
                     cursor.execute(query, value)
-                    QMessageBox.information(self,"Success","Record added success.")
+                    QMessageBox.information(self,"Success",message)
+                    conn.commit()
+                    self.refresh_data()
                 except Exception as e:
-                    QMessageBox.critical(self,"Error","Error Saving Data")
-                    print(e)
+                    QMessageBox.critical(self,"Error",str(e))
                 
 
             elif self.sender_name == "Category":
@@ -1197,26 +1206,30 @@ class AddDetails(QWidget):
                     return
 
                 is_active = self.is_active_widget.isChecked()
+                if self.category_id != None:
+                    is_update = True
+                    message = 'Record Updated Success..'
                 try:
                     conn, cursor = db.get_connection()
-                    query = """INSERT INTO category (cat_code, cat_description, is_active) VALUES (%s,%s,%s)"""
-                    values = (self.category_id,category_name,is_active)
+                    if is_update:
+                        query = 'UPDATE categories SET cat_description=%s, is_active = %s WHERE cat_code = %s'
+                        values = (
+                            category_name,is_active,self.category_id
+                        )
+                    else:
+                        query = """INSERT INTO categories (cat_code, cat_description, is_active) VALUES (%s,%s,%s)"""
+                        values = (self.category_id,category_name,is_active)
                     cursor.execute(query,values)
+                    conn.commit()
+                    self.refresh_data()
+                    QMessageBox.information(self,'Success',message)
                 except Exception as e:
                     QMessageBox.critical(self,"Error","Error Saving Records")
                     print(e)
-                save_res = db.save_category(self.category_id, category_name, is_active)
+                
 
-                if save_res.get('success'):
-                    QMessageBox.information(self, "Success", "Record saved successfully.")
-                    self.refresh_data()
-                else:
-                    error_msg = save_res.get('message', 'Unknown error')
-                    if save_res.get('error') == 'DUPLICATE_ENTRY':
-                        QMessageBox.warning(self, "Duplicate Error", "Category name already exists.")
-                    else:
-                        QMessageBox.critical(self, "Error", f"Error saving data: {error_msg}")
 
+                
         except Exception as e:
             QMessageBox.critical(self, "Error", f"An unexpected error occurred: {str(e)}")
         finally:
@@ -1325,7 +1338,6 @@ class TableModel(QAbstractTableModel):
             conn, cursor = db.get_connection()
             cursor.execute(query)
             result = cursor.fetchall()
-            print(result)
             if result is None:
                 self._data = []
                 self._headers = []
