@@ -4,7 +4,7 @@ from PyQt6.QtGui import *
 from PyQt6.QtCore import *
 import sys
 from decimal import Decimal, InvalidOperation
-from databasemanager import DatabaseManager
+from database import DatabaseManager
 
 
 def load_stylesheet():
@@ -21,6 +21,7 @@ class Products(QMainWindow):
         self._is_saving = False
         self._current_product_id = None
         self._selected_row = 0
+        self.is_update = False
         self.setup_ui()
         self.setup_enter_navigation()
 
@@ -502,13 +503,23 @@ class Products(QMainWindow):
             product_id = int(product_id)
         except (ValueError, TypeError):
             return
-
-        product_data = db.get_product_by_id(product_id)
+        conn, cursor = db.get_connection()
+        cursor.execute("SELECT * FROM products where prd_id = %s",(product_id,))
+        product_data = cursor.fetchone()
         if product_data is None:
             QMessageBox.critical(self, "Error", "Product not found or database error.")
             return
-
-        product_company_data = db.get_product_other_by_id(product_id)
+        conn, cursor = db.get_connection()
+        cursor.execute("""
+                SELECT p.prd_name, 
+                       c.cat_description, p.prd_cat_id,
+                       comp.company_description, p.prd_company_id
+                FROM products p
+                LEFT JOIN categories c ON p.prd_cat_id = c.cat_code
+                LEFT JOIN company_data comp ON p.prd_company_id = comp.company_code
+                WHERE p.prd_id = %s
+            """,(product_id,))
+        product_company_data = cursor.fetchone()
         if product_company_data is None:
             QMessageBox.critical(self, "Error", "Product details incomplete.")
             return
@@ -630,6 +641,8 @@ class Products(QMainWindow):
             re_order = row_data[6]
             barcode = str(row_data[7] or "").strip()
             is_active = row_data[8] if row_data[8] is not None else True
+            company_name = self.company_name_value.text().strip()
+            cat_name = self.category_name_value.text().strip()
 
             if not product_name:
                 QMessageBox.warning(self, "Validation Error", "Product Name is required.")
@@ -702,25 +715,28 @@ class Products(QMainWindow):
             if barcode and not barcode.strip():
                 barcode = None
 
-            # UPDATED: Save with category_id instead of group_id
-            save_res = db.save_update_insert_product(
-                product_id, product_code, product_name, carton_size,
-                unit_cost_price, unit_sale_price, re_order, barcode,
-                is_active, category_id, company_id
-            )
-
-            if save_res.get('success'):
-                QMessageBox.information(self, "Success", "Data saved successfully.")
-                self.view_model._load_data("SELECT prd_id, prd_name from products")
-                self.clear_all_inputs()  # Clear all inputs after successful save
-            else:
-                error_msg = save_res.get('message', 'Unknown error')
-                if save_res.get('error') == 'DUPLICATE_ENTRY':
-                    QMessageBox.warning(self, "Duplicate Error", "Product Code or Barcode already exists.")
-                elif save_res.get('error') == 'FOREIGN_KEY_VIOLATION':
-                    QMessageBox.warning(self, "Reference Error", "Invalid Category or Company reference.")
+            if product_id == None or product_id == "":
+                self.is_update = True
+            try:
+                conn, cursor = db.get_connection()
+                if self.is_update:
+                    query = """UPDATE products SET prd_code = %s, prd_name = %s, prd_carton_size = %s, prd_cost_price = %s, prd_sale_price = %s, prd_reorder = %s, prd_barcode = %s, prd_is_active = %s, prd_company_id = %s, prd_cat_id = %s ,company_name = %s, cat_name = %s WHERE prd_id = %s"""
+                    values = (
+                        product_code,product_name, carton_size, unit_cost_price, unit_sale_price, re_order, barcode, is_active,company_id,category_id, company_name,cat_name,product_code
+                    )
+                    message = "Data Updated Successfully."
                 else:
-                    QMessageBox.critical(self, "Error", f"Error saving data: {error_msg}")
+                    query = """INSERT INTO products (prd_id, prd_code, prd_name, prd_carton_size, prd_cost_price, prd_sale_price, prd_reorder, prd_barcode, prd_is_active, prd_company_id, prd_cat_id,company_name,cat_name)"""
+                    values = (
+                        product_id, product_code, product_name, carton_size, unit_cost_price, unit_sale_price, re_order, barcode, is_active, company_id, category_id,company_name, cat_name
+                    )
+                    message = "Data Inserted Successfully."
+                cursor.execute(query,values)
+                conn.commit()
+                QMessageBox.information(self,"Success",message)
+            except Exception as e:
+                QMessageBox.critical(self,"Error","Error to Save/Update Data.")
+
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"An unexpected error occurred: {str(e)}")
@@ -740,10 +756,10 @@ class Products(QMainWindow):
                 self.suggestion_widget.sent_data.connect(lambda data: self.on_receive_data(data, sender_name))
             if code.isdigit():
                 code = int(code)
-                get_company_name = db.get_any_thing(
-                    "SELECT company_description FROM company_data WHERE company_code = %s",
-                    code
-                )
+                conn, cursor = db.get_connection()
+                query = "SELECT company_description FROM company_data WHERE company_code = %s"
+                cursor.execute(query,(code,))
+                get_company_name = cursor.fetchone()
                 if get_company_name is None:
                     self.company_name_value.setText("Invalid Code")
                     self.company_name_value.setStyleSheet("border:1px solid red; color:red;")
@@ -763,10 +779,11 @@ class Products(QMainWindow):
                 self.suggestion_widget.sent_data.connect(lambda data: self.on_receive_data(data, sender_name))
             if code.isdigit():
                 code = int(code)
-                get_category_name = db.get_any_thing(
-                    "SELECT cat_description FROM categories WHERE cat_code = %s",
-                    code
-                )
+                conn, cursor = db.get_connection()
+                query = "SELECT cat_description FROM categories WHERE cat_code = %s"
+                cursor.execute(query,(code,))
+                get_category_name = cursor.fetchone()
+                print(get_category_name)
                 if get_category_name is None:
                     self.category_name_value.setText("Invalid Code")
                     self.category_name_value.setStyleSheet("border:1px solid red; color:red;")
@@ -1162,20 +1179,16 @@ class AddDetails(QWidget):
                 city = self.city_input_value.text().strip() or None
                 short_name = self.short_name_value.text().strip() or None
                 is_active = self.is_active_widget.isChecked()
-
-                save_res = db.save_company_data(
-                    self.company_id, company_name, address, city, short_name, is_active
-                )
-
-                if save_res.get('success'):
-                    QMessageBox.information(self, "Success", "Record saved successfully.")
-                    self.refresh_data()
-                else:
-                    error_msg = save_res.get('message', 'Unknown error')
-                    if save_res.get('error') == 'DUPLICATE_ENTRY':
-                        QMessageBox.warning(self, "Duplicate Error", "Company name already exists.")
-                    else:
-                        QMessageBox.critical(self, "Error", f"Error saving data: {error_msg}")
+                try:
+                    conn, cursor = db.get_connection()
+                    query = "INSERT INTO company_data (company_id, company_name, address, city, short_name, is_active) VALUES (%s,%s,%s,%s,%s,%s)"
+                    value = (self.company_id, company_name, address, city, short_name, is_active)
+                    cursor.execute(query, value)
+                    QMessageBox.information(self,"Success","Record added success.")
+                except Exception as e:
+                    QMessageBox.critical(self,"Error","Error Saving Data")
+                    print(e)
+                
 
             elif self.sender_name == "Category":
                 category_name = self.name_input_value.text().strip()
@@ -1184,6 +1197,14 @@ class AddDetails(QWidget):
                     return
 
                 is_active = self.is_active_widget.isChecked()
+                try:
+                    conn, cursor = db.get_connection()
+                    query = """INSERT INTO category (cat_code, cat_description, is_active) VALUES (%s,%s,%s)"""
+                    values = (self.category_id,category_name,is_active)
+                    cursor.execute(query,values)
+                except Exception as e:
+                    QMessageBox.critical(self,"Error","Error Saving Records")
+                    print(e)
                 save_res = db.save_category(self.category_id, category_name, is_active)
 
                 if save_res.get('success'):
@@ -1301,7 +1322,10 @@ class TableModel(QAbstractTableModel):
     def _load_data(self, query):
         self.beginResetModel()
         try:
-            result = db.get_products(query)
+            conn, cursor = db.get_connection()
+            cursor.execute(query)
+            result = cursor.fetchall()
+            print(result)
             if result is None:
                 self._data = []
                 self._headers = []
