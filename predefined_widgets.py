@@ -2,7 +2,7 @@
 from PyQt6.QtWidgets import *
 from PyQt6.QtCore import *
 from PyQt6.QtGui import *
-from databasemanager import DatabaseManager
+from database import DatabaseManager
 db = DatabaseManager()
 
 class Suggestion(QWidget):
@@ -322,6 +322,7 @@ class TableModel(QAbstractTableModel):
         super().__init__()
         self._data = []
         self._headers = []
+        self.conn, self.cursor = db.get_connection()
         self._query = query
         self._load_data(query)
 
@@ -334,7 +335,8 @@ class TableModel(QAbstractTableModel):
         """Private method to load data from database"""
         self.beginResetModel()
         try:
-            result = db.get_any_table(query)
+            self.cursor.execute(query)
+            result = self.cursor.fetchall()
             
             if result is None:
                 print(f"No data returned for query: {query}")

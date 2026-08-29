@@ -1,9 +1,56 @@
+# manage_areas.py
 from PyQt6.QtWidgets import *
 from PyQt6.QtGui import *
 from PyQt6.QtCore import *
-from databasemanager import DatabaseManager
+from database import DatabaseManager
+import functools
+import traceback
 
 db = DatabaseManager()
+
+
+# ============================================
+# ERROR HANDLING DECORATOR
+# ============================================
+def handle_errors(func):
+    """Decorator to handle errors in manage areas UI methods"""
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return func(self, *args, **kwargs)
+        except Exception as e:
+            traceback.print_exc()
+            
+            action = func.__name__.replace("_", " ").strip().title()
+            
+            explanation = "An unexpected error occurred."
+            
+            if isinstance(e, ValueError):
+                explanation = "One of the values entered isn't valid. Please check your input."
+            elif isinstance(e, TypeError):
+                explanation = "The program used a value the wrong way internally."
+            elif isinstance(e, (IndexError, KeyError)):
+                explanation = "Some data the program expected was missing or doesn't exist."
+            elif isinstance(e, AttributeError):
+                explanation = "A step was likely skipped before this action."
+            elif isinstance(e, (FileNotFoundError, PermissionError, OSError)):
+                explanation = "There was a problem reading or writing a file."
+            elif type(e).__name__ in ("OperationalError", "InterfaceError", "DatabaseError",
+                                      "ProgrammingError", "IntegrityError"):
+                explanation = "There was a problem with the database connection or query."
+            
+            QMessageBox.critical(
+                self,
+                f"Error - {action}",
+                f"Something went wrong while:\n"
+                f"   {action}\n\n"
+                f"What this usually means:\n"
+                f"   {explanation}\n\n"
+                f"Technical details:\n"
+                f"   {type(e).__name__}: {e}"
+            )
+            return None
+    return wrapper
 
 
 class ManageAreas(QWidget):
@@ -93,6 +140,7 @@ class ManageAreas(QWidget):
     # AREAS TAB
     # =========================================================
 
+    @handle_errors
     def setup_areas_tab(self):
         """Setup the Areas tab with input form and table"""
         layout = QHBoxLayout(self.areas_tab)
@@ -189,7 +237,7 @@ class ManageAreas(QWidget):
         table_layout.setContentsMargins(0, 0, 0, 0)
         table_layout.setSpacing(10)
 
-        # Search bar
+        # Search bar (NO DELETE BUTTON)
         search_layout = QHBoxLayout()
         self.area_search_input = QLineEdit()
         self.area_search_input.setPlaceholderText("Search areas...")
@@ -222,25 +270,8 @@ class ManageAreas(QWidget):
         """)
         self.area_refresh_btn.clicked.connect(self.refresh_areas)
 
-        self.area_delete_btn = QPushButton("Delete")
-        self.area_delete_btn.setFixedSize(120, 35)
-        self.area_delete_btn.setStyleSheet("""
-            QPushButton {
-                background: #EF4444;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                font-weight: 600;
-            }
-            QPushButton:hover {
-                background: #DC2626;
-            }
-        """)
-        self.area_delete_btn.clicked.connect(self.delete_area)
-
         search_layout.addWidget(self.area_search_input)
         search_layout.addWidget(self.area_refresh_btn)
-        search_layout.addWidget(self.area_delete_btn)
         table_layout.addLayout(search_layout)
 
         # Table view
@@ -302,6 +333,7 @@ class ManageAreas(QWidget):
     # SUB AREAS TAB
     # =========================================================
 
+    @handle_errors
     def setup_subareas_tab(self):
         """Setup the Sub Areas tab with input form and table"""
         layout = QHBoxLayout(self.subareas_tab)
@@ -403,7 +435,7 @@ class ManageAreas(QWidget):
         table_layout.setContentsMargins(0, 0, 0, 0)
         table_layout.setSpacing(10)
 
-        # Search bar
+        # Search bar (NO DELETE BUTTON)
         search_layout = QHBoxLayout()
         self.subarea_search_input = QLineEdit()
         self.subarea_search_input.setPlaceholderText("Search sub areas...")
@@ -436,25 +468,8 @@ class ManageAreas(QWidget):
         """)
         self.subarea_refresh_btn.clicked.connect(self.refresh_subareas)
 
-        self.subarea_delete_btn = QPushButton("Delete")
-        self.subarea_delete_btn.setFixedSize(120, 35)
-        self.subarea_delete_btn.setStyleSheet("""
-            QPushButton {
-                background: #EF4444;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                font-weight: 600;
-            }
-            QPushButton:hover {
-                background: #DC2626;
-            }
-        """)
-        self.subarea_delete_btn.clicked.connect(self.delete_subarea)
-
         search_layout.addWidget(self.subarea_search_input)
         search_layout.addWidget(self.subarea_refresh_btn)
-        search_layout.addWidget(self.subarea_delete_btn)
         table_layout.addLayout(search_layout)
 
         # Table view
@@ -593,10 +608,13 @@ class ManageAreas(QWidget):
 
         return widget, combo_box
 
+    @handle_errors
     def load_area_combo(self):
         """Load areas into the subarea combo box."""
         try:
-            areas = db.get_any_table("SELECT id, area_name FROM areas ORDER BY area_name")
+            conn, cursor = db.get_connection()
+            cursor.execute("SELECT id, area_name FROM areas ORDER BY area_name")
+            areas = cursor.fetchall()
             self.subarea_area_combo.clear()
             self.subarea_area_combo.addItem("Select Area", None)
             
@@ -610,7 +628,8 @@ class ManageAreas(QWidget):
     # AREA CRUD OPERATIONS
     # =========================================================
 
-    def save_area(self):
+    @handle_errors
+    def save_area(self, checked=False):
         """Save or update area."""
         try:
             area_id = self.area_id_input.text().strip()
@@ -621,11 +640,15 @@ class ManageAreas(QWidget):
                 QMessageBox.warning(self, "Validation Error", "Area name is required!")
                 return
 
+            conn, cursor = db.get_connection()
+            
             # Check if area name already exists (except current)
-            existing = db.get_any_table(
-                "SELECT id FROM areas WHERE area_name = %s AND id != %s",
-                (area_name, int(area_id) if area_id else 0)
-            )
+            if area_id:
+                cursor.execute("SELECT id FROM areas WHERE area_name = %s AND id != %s", (area_name, int(area_id)))
+            else:
+                cursor.execute("SELECT id FROM areas WHERE area_name = %s", (area_name,))
+            
+            existing = cursor.fetchone()
             if existing:
                 QMessageBox.warning(self, "Duplicate Error", "Area name already exists!")
                 return
@@ -634,79 +657,32 @@ class ManageAreas(QWidget):
                 # Update
                 query = "UPDATE areas SET area_name = %s, is_active = %s WHERE id = %s"
                 params = (area_name, is_active, int(area_id))
+                message = "Area updated successfully!"
             else:
                 # Insert
                 query = "INSERT INTO areas (area_name, is_active) VALUES (%s, %s)"
                 params = (area_name, is_active)
+                message = "Area added successfully!"
 
-            result = db._execute_write(query, params)
+            cursor.execute(query, params)
+            conn.commit()
             
-            if result["success"]:
-                QMessageBox.information(self, "Success", "Area saved successfully!")
-                self.clear_area_form()
-                self.refresh_areas()
-                self.load_area_combo()
-            else:
-                QMessageBox.critical(self, "Error", f"Failed to save area: {result.get('message', 'Unknown error')}")
+            QMessageBox.information(self, "Success", message)
+            self.clear_area_form()
+            self.refresh_areas()
+            self.load_area_combo()
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"An error occurred: {str(e)}")
 
-    def delete_area(self):
-        """Delete selected area."""
-        try:
-            selected = self.area_table.currentIndex()
-            if not selected.isValid():
-                QMessageBox.warning(self, "Warning", "Please select an area to delete!")
-                return
-
-            # Get the actual row from proxy
-            row = self.area_proxy.mapToSource(selected).row()
-            area_id = self.area_model._data[row]['id']
-
-            # Check if area has subareas
-            subareas = db.get_any_table("SELECT id FROM sub_areas WHERE area_id = %s", (area_id,))
-            if subareas:
-                reply = QMessageBox.question(
-                    self,
-                    "Confirm Delete",
-                    "This area has sub-areas. Deleting it will also delete all associated sub-areas.\n\nAre you sure?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
-                if reply == QMessageBox.StandardButton.No:
-                    return
-
-            reply = QMessageBox.question(
-                self,
-                "Confirm Delete",
-                "Are you sure you want to delete this area?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-
-            if reply == QMessageBox.StandardButton.Yes:
-                # Delete area (cascade will handle subareas if foreign key is set)
-                result = db._execute_write("DELETE FROM areas WHERE id = %s", (area_id,))
-                
-                if result["success"]:
-                    QMessageBox.information(self, "Success", "Area deleted successfully!")
-                    self.clear_area_form()
-                    self.refresh_areas()
-                    self.load_area_combo()
-                else:
-                    QMessageBox.critical(self, "Error", f"Failed to delete area: {result.get('message', 'Unknown error')}")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"An error occurred: {str(e)}")
-
+    @handle_errors
     def refresh_areas(self):
         """Refresh area table."""
-        try:
-            self.area_model.load_data()
-            self.area_search_input.clear()
-            self.area_table.clearSelection()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to refresh areas: {str(e)}")
+        self.area_model.load_data()
+        self.area_search_input.clear()
+        self.area_table.clearSelection()
 
+    @handle_errors
     def clear_area_form(self):
         """Clear area form."""
         self.area_id_input.clear()
@@ -714,24 +690,22 @@ class ManageAreas(QWidget):
         self.area_active_check.setChecked(True)
         self.area_name_input.setFocus()
 
+    @handle_errors
     def on_area_select(self, index):
         """Load selected area into form."""
-        try:
-            row = self.area_proxy.mapToSource(index).row()
-            data = self.area_model._data[row]
+        row = self.area_proxy.mapToSource(index).row()
+        data = self.area_model._data[row]
 
-            self.area_id_input.setText(str(data['id']))
-            self.area_name_input.setText(str(data['area_name']))
-            self.area_active_check.setChecked(data['is_active'] == 1)
-
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load area: {str(e)}")
+        self.area_id_input.setText(str(data['id']))
+        self.area_name_input.setText(str(data['area_name']))
+        self.area_active_check.setChecked(data['is_active'] == 1)
 
     # =========================================================
     # SUB AREA CRUD OPERATIONS
     # =========================================================
 
-    def save_subarea(self):
+    @handle_errors
+    def save_subarea(self, checked=False):
         """Save or update subarea."""
         try:
             subarea_id = self.subarea_id_input.text().strip()
@@ -747,76 +721,59 @@ class ManageAreas(QWidget):
                 QMessageBox.warning(self, "Validation Error", "Sub area name is required!")
                 return
 
+            conn, cursor = db.get_connection()
+            
             # Check if subarea name already exists for this area (except current)
-            existing = db.get_any_table(
-                "SELECT id FROM sub_areas WHERE sub_area_name = %s AND area_id = %s AND id != %s",
-                (subarea_name, area_id, int(subarea_id) if subarea_id else 0)
-            )
+            if subarea_id:
+                cursor.execute(
+                    "SELECT id FROM sub_areas WHERE sub_area_name = %s AND area_id = %s AND id != %s",
+                    (subarea_name, area_id, int(subarea_id))
+                )
+            else:
+                cursor.execute(
+                    "SELECT id FROM sub_areas WHERE sub_area_name = %s AND area_id = %s",
+                    (subarea_name, area_id)
+                )
+            
+            existing = cursor.fetchone()
             if existing:
                 QMessageBox.warning(self, "Duplicate Error", "Sub area name already exists in this area!")
                 return
 
+            # Get area_name for the foreign key constraint
+            cursor.execute("SELECT area_name FROM areas WHERE id = %s", (area_id,))
+            area_result = cursor.fetchone()
+            area_name = area_result['area_name'] if area_result else ""
+
             if subarea_id:
                 # Update
-                query = "UPDATE sub_areas SET area_id = %s, sub_area_name = %s, is_active = %s WHERE id = %s"
-                params = (area_id, subarea_name, is_active, int(subarea_id))
+                query = "UPDATE sub_areas SET area_id = %s, area_name = %s, sub_area_name = %s, is_active = %s WHERE id = %s"
+                params = (area_id, area_name, subarea_name, is_active, int(subarea_id))
+                message = "Sub area updated successfully!"
             else:
                 # Insert
-                query = "INSERT INTO sub_areas (area_id, sub_area_name, is_active) VALUES (%s, %s, %s)"
-                params = (area_id, subarea_name, is_active)
+                query = "INSERT INTO sub_areas (area_id, area_name, sub_area_name, is_active) VALUES (%s, %s, %s, %s)"
+                params = (area_id, area_name, subarea_name, is_active)
+                message = "Sub area added successfully!"
 
-            result = db._execute_write(query, params)
+            cursor.execute(query, params)
+            conn.commit()
             
-            if result["success"]:
-                QMessageBox.information(self, "Success", "Sub area saved successfully!")
-                self.clear_subarea_form()
-                self.refresh_subareas()
-            else:
-                QMessageBox.critical(self, "Error", f"Failed to save subarea: {result.get('message', 'Unknown error')}")
+            QMessageBox.information(self, "Success", message)
+            self.clear_subarea_form()
+            self.refresh_subareas()
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"An error occurred: {str(e)}")
 
-    def delete_subarea(self):
-        """Delete selected subarea."""
-        try:
-            selected = self.subarea_table.currentIndex()
-            if not selected.isValid():
-                QMessageBox.warning(self, "Warning", "Please select a sub area to delete!")
-                return
-
-            row = self.subarea_proxy.mapToSource(selected).row()
-            subarea_id = self.subarea_model._data[row]['id']
-
-            reply = QMessageBox.question(
-                self,
-                "Confirm Delete",
-                "Are you sure you want to delete this sub area?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-
-            if reply == QMessageBox.StandardButton.Yes:
-                result = db._execute_write("DELETE FROM sub_areas WHERE id = %s", (subarea_id,))
-                
-                if result["success"]:
-                    QMessageBox.information(self, "Success", "Sub area deleted successfully!")
-                    self.clear_subarea_form()
-                    self.refresh_subareas()
-                else:
-                    QMessageBox.critical(self, "Error", f"Failed to delete subarea: {result.get('message', 'Unknown error')}")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"An error occurred: {str(e)}")
-
+    @handle_errors
     def refresh_subareas(self):
         """Refresh subarea table."""
-        try:
-            self.subarea_model.load_data()
-            self.subarea_search_input.clear()
-            self.subarea_table.clearSelection()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to refresh subareas: {str(e)}")
+        self.subarea_model.load_data()
+        self.subarea_search_input.clear()
+        self.subarea_table.clearSelection()
 
+    @handle_errors
     def clear_subarea_form(self):
         """Clear subarea form."""
         self.subarea_id_input.clear()
@@ -825,24 +782,21 @@ class ManageAreas(QWidget):
         self.subarea_active_check.setChecked(True)
         self.subarea_name_input.setFocus()
 
+    @handle_errors
     def on_subarea_select(self, index):
         """Load selected subarea into form."""
-        try:
-            row = self.subarea_proxy.mapToSource(index).row()
-            data = self.subarea_model._data[row]
+        row = self.subarea_proxy.mapToSource(index).row()
+        data = self.subarea_model._data[row]
 
-            self.subarea_id_input.setText(str(data['id']))
-            
-            # Set area combo
-            index = self.subarea_area_combo.findData(data['area_id'])
-            if index >= 0:
-                self.subarea_area_combo.setCurrentIndex(index)
-            
-            self.subarea_name_input.setText(str(data['sub_area_name']))
-            self.subarea_active_check.setChecked(data['is_active'] == 1)
-
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load subarea: {str(e)}")
+        self.subarea_id_input.setText(str(data['id']))
+        
+        # Set area combo
+        idx = self.subarea_area_combo.findData(data['area_id'])
+        if idx >= 0:
+            self.subarea_area_combo.setCurrentIndex(idx)
+        
+        self.subarea_name_input.setText(str(data['sub_area_name']))
+        self.subarea_active_check.setChecked(data['is_active'] == 1)
 
 
 # =========================================================
@@ -856,11 +810,14 @@ class AreaTableModel(QAbstractTableModel):
         self._data = []
         self.load_data()
 
+    @handle_errors
     def load_data(self):
         """Load data from database."""
         self.beginResetModel()
         try:
-            result = db.get_any_table("SELECT id, area_name, is_active FROM areas ORDER BY area_name")
+            conn, cursor = db.get_connection()
+            cursor.execute("SELECT id, area_name, is_active FROM areas ORDER BY area_name")
+            result = cursor.fetchall()
             self._data = result if result else []
         except Exception as e:
             print(f"Error loading areas: {e}")
@@ -911,6 +868,7 @@ class SubAreaTableModel(QAbstractTableModel):
         self._data = []
         self.load_data()
 
+    @handle_errors
     def load_data(self):
         """Load data from database with join to get area name."""
         self.beginResetModel()
@@ -921,7 +879,9 @@ class SubAreaTableModel(QAbstractTableModel):
                 LEFT JOIN areas a ON s.area_id = a.id
                 ORDER BY a.area_name, s.sub_area_name
             """
-            result = db.get_any_table(query)
+            conn, cursor = db.get_connection()
+            cursor.execute(query)
+            result = cursor.fetchall()
             self._data = result if result else []
         except Exception as e:
             print(f"Error loading subareas: {e}")

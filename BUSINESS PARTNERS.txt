@@ -119,3 +119,9 @@ CREATE TABLE IF NOT EXISTS sub_areas (
     FOREIGN KEY (area_id) REFERENCES areas(id) ON DELETE CASCADE,
     FOREIGN KEY (area_name) REFERENCES areas(area_name) ON DELETE CASCADE
 );
+
+
+#####################    Type #####################
+CREATE TABLE IF NOT EXISTS customer_type(
+id INT AUTO_INCREMENT PRIMARY KEY,
+type_name varhcar(100) NOT NULL);

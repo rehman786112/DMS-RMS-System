@@ -5,6 +5,58 @@ from PyQt6.QtCore import *
 import sys
 from decimal import Decimal, InvalidOperation
 from database import DatabaseManager
+import functools
+import traceback
+
+
+# ============================================
+# ERROR HANDLING DECORATOR
+# ============================================
+def handle_errors(func):
+    """Decorator to handle errors in product UI methods"""
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return func(self, *args, **kwargs)
+        except Exception as e:
+            # Full traceback for debugging
+            traceback.print_exc()
+            
+            # Get action name
+            action = func.__name__.replace("_", " ").strip().title()
+            
+            # Plain language explanation
+            explanation = "An unexpected error occurred."
+            
+            if isinstance(e, ValueError):
+                explanation = "One of the values entered isn't valid. Please check your input."
+            elif isinstance(e, TypeError):
+                explanation = "The program used a value the wrong way internally. This is a code issue."
+            elif isinstance(e, (IndexError, KeyError)):
+                explanation = "Some data the program expected was missing or doesn't exist."
+            elif isinstance(e, AttributeError):
+                explanation = "A step was likely skipped before this action."
+            elif isinstance(e, (FileNotFoundError, PermissionError, OSError)):
+                explanation = "There was a problem reading or writing a file."
+            elif type(e).__name__ in ("OperationalError", "InterfaceError", "DatabaseError",
+                                      "ProgrammingError", "IntegrityError"):
+                explanation = "There was a problem with the database connection or query."
+            elif isinstance(e, InvalidOperation):
+                explanation = "Invalid number format. Please enter a valid decimal number."
+            
+            # Show error message
+            QMessageBox.critical(
+                self,
+                f"Error - {action}",
+                f"Something went wrong while:\n"
+                f"   {action}\n\n"
+                f"What this usually means:\n"
+                f"   {explanation}\n\n"
+                f"Technical details:\n"
+                f"   {type(e).__name__}: {e}"
+            )
+            return None
+    return wrapper
 
 
 def load_stylesheet():
@@ -22,8 +74,18 @@ class Products(QMainWindow):
         self._current_product_id = None
         self._selected_row = 0
         self.is_update = False
-        self.setup_ui()
-        self.setup_enter_navigation()
+        
+        # Initialize UI with error handling
+        try:
+            self.setup_ui()
+            self.setup_enter_navigation()
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(
+                self,
+                "Initialization Error",
+                f"Failed to initialize Products window:\n\n{type(e).__name__}: {e}"
+            )
 
     def setup_enter_navigation(self):
         for widget in self.findChildren(QLineEdit):
@@ -151,6 +213,7 @@ class Products(QMainWindow):
             table_view.scrollTo(model_index, QAbstractItemView.ScrollHint.EnsureVisible)
             table_view.setFocus()
 
+    @handle_errors
     def setup_ui(self):
         self.setup_window()
         self.main_layout = QVBoxLayout()
@@ -195,6 +258,7 @@ class Products(QMainWindow):
         header_layout.addWidget(label)
         return header
 
+    @handle_errors
     def product_details(self):
         self.product_detail = QWidget()
         self.product_detail.setFixedWidth(400)
@@ -233,6 +297,7 @@ class Products(QMainWindow):
         self.product_detail_layout.addWidget(self.product_detail_view)
         self.product_main_layout.addWidget(self.product_detail)
 
+    @handle_errors
     def product_description(self):
         self.product_desc = QWidget()
         self.product_desc_layout = QVBoxLayout(self.product_desc)
@@ -251,7 +316,7 @@ class Products(QMainWindow):
         self.product_name_layout.addWidget(self.product_desc_label_widget)
         self.product_name_layout.addWidget(self.p_name_input, alignment=Qt.AlignmentFlag.AlignLeft)
 
-        # UPDATED: Category and Company only (removed Group and Gender)
+        # Category and Company only
         self.category_company_widget = QWidget()
         self.category_company_layout = QVBoxLayout(self.category_company_widget)
 
@@ -261,13 +326,13 @@ class Products(QMainWindow):
         self.category_company_input_widget = QWidget()
         self.category_company_input_layout = QGridLayout(self.category_company_input_widget)
 
-        # Category fields (replaces Group)
+        # Category fields
         self.category_code, self.category_code_value = self.create_input_field("Category")
         self.category_code_value.textChanged.connect(lambda: self.on_text_change("category"))
         self.category_name, self.category_name_value = self.create_input_field("Name")
         self.category_name_value.setReadOnly(True)
 
-        # Company fields (kept as is)
+        # Company fields
         self.company_code, self.company_code_value = self.create_input_field("Company")
         self.company_code_value.textChanged.connect(lambda: self.on_text_change("company"))
         self.company_name, self.company_name_value = self.create_input_field("Name")
@@ -360,6 +425,7 @@ class Products(QMainWindow):
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         return button
 
+    @handle_errors
     def footer_window(self):
         self.footer_widget = QWidget()
         self.footer_widget.setFixedHeight(80)
@@ -427,7 +493,9 @@ class Products(QMainWindow):
 
         self.main_layout.addWidget(self.footer_widget)
 
-    def on_update_product_name(self):
+    @handle_errors
+    def on_update_product_name(self, text=""):
+        """Update product name in table when user types"""
         item = self.product_edit_model.item(0, 2)
         if item is None:
             item = self.create_item("")
@@ -486,6 +554,7 @@ class Products(QMainWindow):
 
         return text
 
+    @handle_errors
     def on_product_select(self, index):
         proxy = self.product_detail_view.model()
         if not proxy:
@@ -503,12 +572,14 @@ class Products(QMainWindow):
             product_id = int(product_id)
         except (ValueError, TypeError):
             return
+        
         conn, cursor = db.get_connection()
-        cursor.execute("SELECT * FROM products where prd_id = %s",(product_id,))
+        cursor.execute("SELECT * FROM products where prd_id = %s", (product_id,))
         product_data = cursor.fetchone()
         if product_data is None:
             QMessageBox.critical(self, "Error", "Product not found or database error.")
             return
+        
         conn, cursor = db.get_connection()
         cursor.execute("""
                 SELECT p.prd_name, 
@@ -518,14 +589,13 @@ class Products(QMainWindow):
                 LEFT JOIN categories c ON p.prd_cat_id = c.cat_code
                 LEFT JOIN company_data comp ON p.prd_company_id = comp.company_code
                 WHERE p.prd_id = %s
-            """,(product_id,))
+            """, (product_id,))
         product_company_data = cursor.fetchone()
         if product_company_data is None:
             QMessageBox.critical(self, "Error", "Product details incomplete.")
             return
 
         try:
-            # UPDATED: Get category and company data
             category_id = product_company_data.get('prd_cat_id')
             category_name = product_company_data.get('cat_description', '')
             company_id = product_company_data.get('prd_company_id')
@@ -557,6 +627,7 @@ class Products(QMainWindow):
                 item = self.create_item(value)
             self.product_edit_model.setItem(0, col, item)
 
+    @handle_errors
     def delete_product(self):
         if self._current_product_id is None:
             QMessageBox.information(self, "Message", "Please Double click on row to select for Actions")
@@ -573,6 +644,7 @@ class Products(QMainWindow):
                 QMessageBox.critical(self, "Error", "Unable to delete Record...")
                 self.refresh_view()
 
+    @handle_errors
     def refresh_view(self):
         self.p_name.setText("")
         self.category_name_value.setText("")
@@ -592,8 +664,9 @@ class Products(QMainWindow):
             self.product_edit_model.setItem(0, col, item)
         
         self.view_model._load_data("SELECT prd_id, prd_name from products")
-        self.p_name.setFocus()  # Set focus to product name input after refresh
+        self.p_name.setFocus()
 
+    @handle_errors
     def clear_all_inputs(self):
         """Clear all input fields and reset form"""
         self.p_name.setText("")
@@ -603,7 +676,6 @@ class Products(QMainWindow):
         self.company_name_value.setText("")
         self.pct_hs_code_value.setText("")
         
-        # Clear the edit table
         for col in range(self.product_edit_model.columnCount()):
             if col == 0:
                 item = self.create_item(None, readonly=True)
@@ -616,9 +688,11 @@ class Products(QMainWindow):
             self.product_edit_model.setItem(0, col, item)
         
         self._current_product_id = None
-        self.p_name.setFocus()  # Focus on product name
+        self.p_name.setFocus()
 
-    def save_data(self):
+    @handle_errors
+    def save_data(self, checked=False):
+        """Save product data - checked parameter for button signal"""
         if self._is_saving:
             return
 
@@ -652,7 +726,6 @@ class Products(QMainWindow):
                 QMessageBox.warning(self, "Validation Error", "Product Code is required.")
                 return
 
-            # UPDATED: Get category and company IDs
             category_id_text = self.category_code_value.text().strip()
             company_id_text = self.company_code_value.text().strip()
 
@@ -671,7 +744,6 @@ class Products(QMainWindow):
                 QMessageBox.warning(self, "Validation Error", "Invalid Category or Company ID.")
                 return
 
-            # Validate numeric fields
             if carton_size is not None:
                 try:
                     carton_size = int(carton_size)
@@ -715,38 +787,31 @@ class Products(QMainWindow):
             if barcode and not barcode.strip():
                 barcode = None
 
-            if product_id == None or product_id == "":
-                self.is_update = True
-            try:
-                conn, cursor = db.get_connection()
-                if self.is_update:
-                    query = """UPDATE products SET prd_code = %s, prd_name = %s, prd_carton_size = %s, prd_cost_price = %s, prd_sale_price = %s, prd_reorder = %s, prd_barcode = %s, prd_is_active = %s, prd_company_id = %s, prd_cat_id = %s ,company_name = %s, cat_name = %s WHERE prd_id = %s"""
-                    values = (
-                        product_code,product_name, carton_size, unit_cost_price, unit_sale_price, re_order, barcode, is_active,company_id,category_id, company_name,cat_name,product_code
-                    )
-                    message = "Data Updated Successfully."
-                else:
-                    query = """INSERT INTO products (prd_id, prd_code, prd_name, prd_carton_size, prd_cost_price, prd_sale_price, prd_reorder, prd_barcode, prd_is_active, prd_company_id, prd_cat_id,company_name,cat_name)"""
-                    values = (
-                        product_id, product_code, product_name, carton_size, unit_cost_price, unit_sale_price, re_order, barcode, is_active, company_id, category_id,company_name, cat_name
-                    )
-                    message = "Data Inserted Successfully."
-                cursor.execute(query,values)
-                conn.commit()
-                QMessageBox.information(self,"Success",message)
-            except Exception as e:
-                QMessageBox.critical(self,"Error","Error to Save/Update Data.")
-
+            conn, cursor = db.get_connection()
+            if product_id is None or product_id == "":
+                query = """INSERT INTO products (prd_id, prd_code, prd_name, prd_carton_size, prd_cost_price, prd_sale_price, prd_reorder, prd_barcode, prd_is_active, prd_company_id, prd_cat_id, company_name, cat_name) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+                values = (product_id, product_code, product_name, carton_size, unit_cost_price, unit_sale_price, re_order, barcode, is_active, company_id, category_id, company_name, cat_name)
+                message = "Data Inserted Successfully."
+            else:
+                query = """UPDATE products SET prd_code = %s, prd_name = %s, prd_carton_size = %s, prd_cost_price = %s, prd_sale_price = %s, prd_reorder = %s, prd_barcode = %s, prd_is_active = %s, prd_company_id = %s, prd_cat_id = %s, company_name = %s, cat_name = %s WHERE prd_id = %s"""
+                values = (product_code, product_name, carton_size, unit_cost_price, unit_sale_price, re_order, barcode, is_active, company_id, category_id, company_name, cat_name, product_id)
+                message = "Data Updated Successfully."
+            
+            cursor.execute(query, values)
+            conn.commit()
+            QMessageBox.information(self, "Success", message)
+            self.refresh_view()
 
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"An unexpected error occurred: {str(e)}")
+            # Let decorator handle it
+            raise
         finally:
             self._is_saving = False
             self.footer_save_btn.setDisabled(False)
             self.footer_save_btn.setText("Save")
 
+    @handle_errors
     def on_text_change(self, sender_name):
-        # UPDATED: Handle category and company only
         if sender_name == "company":
             code = self.company_code_value.text()
             if code == " ":
@@ -757,8 +822,8 @@ class Products(QMainWindow):
             if code.isdigit():
                 code = int(code)
                 conn, cursor = db.get_connection()
-                query = "SELECT company_description FROM company_data WHERE company_code = %s"
-                cursor.execute(query,(code,))
+                query = "SELECT company_description,is_active FROM company_data WHERE company_code = %s"
+                cursor.execute(query, (code,))
                 get_company_name = cursor.fetchone()
                 if get_company_name is None:
                     self.company_name_value.setText("Invalid Code")
@@ -781,9 +846,8 @@ class Products(QMainWindow):
                 code = int(code)
                 conn, cursor = db.get_connection()
                 query = "SELECT cat_description FROM categories WHERE cat_code = %s"
-                cursor.execute(query,(code,))
+                cursor.execute(query, (code,))
                 get_category_name = cursor.fetchone()
-                print(get_category_name)
                 if get_category_name is None:
                     self.category_name_value.setText("Invalid Code")
                     self.category_name_value.setStyleSheet("border:1px solid red; color:red;")
@@ -794,6 +858,7 @@ class Products(QMainWindow):
                 self.category_name_value.setText("")
                 self.category_name_value.setStyleSheet("border:none; color:grey;")
 
+    @handle_errors
     def on_receive_data(self, data, sender_name):
         if sender_name == "category":
             self.category_code_value.setText(str(data[0]))
@@ -805,6 +870,7 @@ class Products(QMainWindow):
             self.company_name_value.setStyleSheet("border:none; color:grey;")
         self.suggestion_widget.close()
 
+    @handle_errors
     def add_new(self, sender_name):
         self.add_detail_window = AddDetails(sender_name)
         self.add_detail_window.show()
@@ -829,7 +895,6 @@ class Suggestion(QWidget):
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search...")
         
-        # UPDATED: Use categories table instead of group_data
         if sender_name == "company":
             self.data_model = TableModel("SELECT company_code, company_description FROM company_data")
         elif sender_name == "category":
@@ -939,75 +1004,82 @@ class AddDetails(QWidget):
         self.setWindowIcon(QIcon("assets/icons/icon.png"))
         self.sender_name = sender_name
         self.company_id = None
-        self.category_id = None  # UPDATED: Replace group_id with category_id
+        self.category_id = None
         self.row_data = []
         self._is_saving = False
 
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.label = self.create_header(f"{sender_name}", "MainLabel", '25px')
-        self.label.setFixedHeight(60)
+        try:
+            self.layout = QVBoxLayout(self)
+            self.layout.setContentsMargins(0, 0, 0, 0)
+            
+            self.label = self.create_header(f"{sender_name}", "MainLabel", '25px')
+            self.label.setFixedHeight(60)
 
-        self._data = QWidget()
-        self._data_layout = QHBoxLayout(self._data)
+            self._data = QWidget()
+            self._data_layout = QHBoxLayout(self._data)
 
-        self._detail_widget = QWidget()
-        self._detail_widget.setObjectName("input_widget")
-        self._detail_widget.setFixedSize(300, 250)
-        self._detail_layout = QVBoxLayout(self._detail_widget)
-        self._detail_layout.addStretch()
-        self._detail_layout.addSpacing(10)
+            self._detail_widget = QWidget()
+            self._detail_widget.setObjectName("input_widget")
+            self._detail_widget.setFixedSize(300, 250)
+            self._detail_layout = QVBoxLayout(self._detail_widget)
+            self._detail_layout.addStretch()
+            self._detail_layout.addSpacing(10)
 
-        self.detail_label_widget = self.create_header(f"{sender_name} Details", "MainLabel", '20px')
-        self.detail_label_widget.setFixedSize(160, 30)
-        self._detail_layout.addWidget(self.detail_label_widget)
+            self.detail_label_widget = self.create_header(f"{sender_name} Details", "MainLabel", '20px')
+            self.detail_label_widget.setFixedSize(160, 30)
+            self._detail_layout.addWidget(self.detail_label_widget)
 
-        self.is_active_widget = QCheckBox("Active")
-        self.is_active_widget.setChecked(True)
-        self._detail_layout.addWidget(self.is_active_widget, alignment=Qt.AlignmentFlag.AlignRight)
+            self.is_active_widget = QCheckBox("Active")
+            self.is_active_widget.setChecked(True)
+            self._detail_layout.addWidget(self.is_active_widget, alignment=Qt.AlignmentFlag.AlignRight)
 
-        self.name_input_widget, self.name_input_value = self.create_input_field("Name")
-        self._detail_layout.addWidget(self.name_input_widget)
+            self.name_input_widget, self.name_input_value = self.create_input_field("Name")
+            self._detail_layout.addWidget(self.name_input_widget)
 
-        self.address_input_widget = None
-        self.address_input_value = None
-        self.city_input_widget = None
-        self.city_input_value = None
-        self.short_name_input_widget = None
-        self.short_name_value = None
+            self.address_input_widget = None
+            self.address_input_value = None
+            self.city_input_widget = None
+            self.city_input_value = None
+            self.short_name_input_widget = None
+            self.short_name_value = None
 
-        # UPDATED: Only handle company and category
-        if sender_name == 'company':
-            self.data_model = TableModel("SELECT * FROM company_data")
-            self.address_input_widget, self.address_input_value = self.create_input_field("Address")
-            self.city_input_widget, self.city_input_value = self.create_input_field("City")
-            self.short_name_input_widget, self.short_name_value = self.create_input_field("Short Name")
-            self._detail_layout.addWidget(self.address_input_widget)
-            self._detail_layout.addWidget(self.city_input_widget)
-            self._detail_layout.addWidget(self.short_name_input_widget)
-        elif sender_name == 'Category':
-            self.data_model = TableModel("SELECT * FROM categories")
+            if sender_name == 'company':
+                self.data_model = TableModel("SELECT * FROM company_data")
+                self.address_input_widget, self.address_input_value = self.create_input_field("Address")
+                self.city_input_widget, self.city_input_value = self.create_input_field("City")
+                self.short_name_input_widget, self.short_name_value = self.create_input_field("Short Name")
+                self._detail_layout.addWidget(self.address_input_widget)
+                self._detail_layout.addWidget(self.city_input_widget)
+                self._detail_layout.addWidget(self.short_name_input_widget)
+            elif sender_name == 'Category':
+                self.data_model = TableModel("SELECT * FROM categories")
 
-        self.existing_data_view = QTableView()
-        self.existing_data_view.setWordWrap(True)
-        self.existing_data_view.setAlternatingRowColors(True)
-        self.existing_data_view.setModel(self.data_model)
-        
-        header = self.existing_data_view.horizontalHeader()
-        header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
-        header.setMinimumSectionSize(100)
-        
-        self.existing_data_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.existing_data_view.verticalHeader().setVisible(False)
-        self.existing_data_view.clicked.connect(self.on_row_click)
+            self.existing_data_view = QTableView()
+            self.existing_data_view.setWordWrap(True)
+            self.existing_data_view.setAlternatingRowColors(True)
+            self.existing_data_view.setModel(self.data_model)
+            
+            header = self.existing_data_view.horizontalHeader()
+            header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
+            header.setMinimumSectionSize(100)
+            
+            self.existing_data_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            self.existing_data_view.verticalHeader().setVisible(False)
+            self.existing_data_view.clicked.connect(self.on_row_click)
 
-        self._data_layout.addWidget(self._detail_widget)
-        self._data_layout.addWidget(self.existing_data_view)
-        self.layout.addWidget(self.label)
-        self.layout.addWidget(self._data)
-        self.footer_window()
-        self.setup_enter_navigation()
+            self._data_layout.addWidget(self._detail_widget)
+            self._data_layout.addWidget(self.existing_data_view)
+            self.layout.addWidget(self.label)
+            self.layout.addWidget(self._data)
+            self.footer_window()
+            self.setup_enter_navigation()
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(
+                self,
+                "Initialization Error",
+                f"Failed to initialize AddDetails window:\n\n{type(e).__name__}: {e}"
+            )
 
     def create_header(self, label_name, object_name, font_size):
         header = QWidget()
@@ -1129,6 +1201,7 @@ class AddDetails(QWidget):
         
         return super().eventFilter(obj, event)
 
+    @handle_errors
     def on_row_click(self, index):
         model = self.existing_data_view.model()
         if not model:
@@ -1160,7 +1233,9 @@ class AddDetails(QWidget):
         except (ValueError, TypeError, IndexError):
             QMessageBox.warning(self, "Error", "Error loading record data.")
 
-    def save_data(self):
+    @handle_errors
+    def save_data(self, checked=False):
+        """Save data - checked parameter for button signal"""
         if self._is_saving:
             return
         is_update = False
@@ -1175,28 +1250,25 @@ class AddDetails(QWidget):
                 if not company_name:
                     QMessageBox.warning(self, "Validation Error", "Company Name is required.")
                     return
-                print(self.company_id)
-                if self.company_id != None:
+                if self.company_id is not None and self.company_id != "":
                     is_update = True
                     message = 'Record Updated Success..'
                 address = self.address_input_value.text().strip() or None
                 city = self.city_input_value.text().strip() or None
                 short_name = self.short_name_value.text().strip() or None
                 is_active = self.is_active_widget.isChecked()
-                try:
-                    conn, cursor = db.get_connection()
-                    if is_update:
-                        query = 'UPDATE company_data SET company_description = %s, city = %s,short_name = %s,is_active = %s WHERE company_code = %s'
-                        value = (company_name,city,short_name,is_active,self.company_id)
-                    else:
-                        query = "INSERT INTO company_data ( company_description, address, city, short_name, is_active) VALUES (%s,%s,%s,%s,%s,%s)"
-                        value = (company_name, address, city, short_name, is_active)
-                    cursor.execute(query, value)
-                    QMessageBox.information(self,"Success",message)
-                    conn.commit()
-                    self.refresh_data()
-                except Exception as e:
-                    QMessageBox.critical(self,"Error",str(e))
+                
+                conn, cursor = db.get_connection()
+                if is_update:
+                    query = 'UPDATE company_data SET company_description = %s, address = %s, city = %s, short_name = %s, is_active = %s WHERE company_code = %s'
+                    values = (company_name, address, city, short_name, is_active, self.company_id)
+                else:
+                    query = "INSERT INTO company_data (company_description, address, city, short_name, is_active) VALUES (%s, %s, %s, %s, %s)"
+                    values = (company_name, address, city, short_name, is_active)
+                cursor.execute(query, values)
+                conn.commit()
+                QMessageBox.information(self, "Success", message)
+                self.refresh_data()
                 
 
             elif self.sender_name == "Category":
@@ -1206,37 +1278,31 @@ class AddDetails(QWidget):
                     return
 
                 is_active = self.is_active_widget.isChecked()
-                if self.category_id != None:
+                if self.category_id is not None and self.category_id != "":
                     is_update = True
                     message = 'Record Updated Success..'
-                try:
-                    conn, cursor = db.get_connection()
-                    if is_update:
-                        query = 'UPDATE categories SET cat_description=%s, is_active = %s WHERE cat_code = %s'
-                        values = (
-                            category_name,is_active,self.category_id
-                        )
-                    else:
-                        query = """INSERT INTO categories (cat_code, cat_description, is_active) VALUES (%s,%s,%s)"""
-                        values = (self.category_id,category_name,is_active)
-                    cursor.execute(query,values)
-                    conn.commit()
-                    self.refresh_data()
-                    QMessageBox.information(self,'Success',message)
-                except Exception as e:
-                    QMessageBox.critical(self,"Error","Error Saving Records")
-                    print(e)
                 
-
-
+                conn, cursor = db.get_connection()
+                if is_update:
+                    query = 'UPDATE categories SET cat_description=%s, is_active = %s WHERE cat_code = %s'
+                    values = (category_name, is_active, self.category_id)
+                else:
+                    query = """INSERT INTO categories (cat_code, cat_description, is_active) VALUES (%s, %s, %s)"""
+                    values = (self.category_id, category_name, is_active)
+                cursor.execute(query, values)
+                conn.commit()
+                self.refresh_data()
+                QMessageBox.information(self, 'Success', message)
                 
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"An unexpected error occurred: {str(e)}")
+            # Let decorator handle it
+            raise
         finally:
             self._is_saving = False
             self.footer_save_btn.setDisabled(False)
             self.footer_save_btn.setText("Save")
 
+    @handle_errors
     def footer_window(self):
         self.footer_widget = QWidget()
         self.footer_widget.setFixedHeight(80)
@@ -1307,22 +1373,20 @@ class AddDetails(QWidget):
     def closeWindow(self):
         self.close()
 
+    @handle_errors
     def refresh_data(self):
-        try:
-            if self.sender_name == "company":
-                self.data_model._load_data("SELECT * FROM company_data")
-                self.name_input_value.setText("")
-                self.address_input_value.setText("")
-                self.city_input_value.setText("")
-                self.short_name_value.setText("")
-                self.company_id = None
-            elif self.sender_name == "Category":
-                self.data_model._load_data("SELECT * FROM categories")
-                self.name_input_value.setText("")
-                self.category_id = None
-            self.is_active_widget.setChecked(True)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error refreshing data: {str(e)}")
+        if self.sender_name == "company":
+            self.data_model._load_data("SELECT * FROM company_data")
+            self.name_input_value.setText("")
+            self.address_input_value.setText("")
+            self.city_input_value.setText("")
+            self.short_name_value.setText("")
+            self.company_id = None
+        elif self.sender_name == "Category":
+            self.data_model._load_data("SELECT * FROM categories")
+            self.name_input_value.setText("")
+            self.category_id = None
+        self.is_active_widget.setChecked(True)
 
 
 class TableModel(QAbstractTableModel):

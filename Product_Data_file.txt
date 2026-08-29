@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS products (
     prd_company_id INT,
     prd_cat_id INT
 );
+ALTER TABLE PRODUCTS ADD COLUMN company_name varchar(100) not null;
+ALTER TABLE products ADD COLUMN cat_name VARCHAR(100) NOT NULL;
 ALTER TABLE products ADD CONSTRAINT fk_category FOREIGN KEY (prd_cat_id) REFERENCES categories(cat_code);
 ALTER TABLE products ADD CONSTRAINT fk_company FOREIGN KEY (prd_company_id) REFERENCES company_data(company_code);
 
