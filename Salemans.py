@@ -238,7 +238,7 @@ class Salemans(QWidget):
     # ================================================================
     def load_types(self):
         try:
-            rows = self.execute_query("SELECT type_name FROM salesmen_type ORDER BY type_name")
+            rows = self.execute_query("SELECT type_name FROM salesmen_type WHERE is_active = true ORDER BY type_name")
             self.type_data = [str(r['type_name']) for r in rows]
         except Exception as e:
             print(f"load_types error: {e}")
