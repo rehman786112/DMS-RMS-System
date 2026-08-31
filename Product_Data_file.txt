@@ -12,7 +12,9 @@ CREATE TABLE IF NOT EXISTS products (
     prd_barcode VARCHAR(80) UNIQUE,
     prd_is_active BOOLEAN DEFAULT TRUE,
     prd_company_id INT,
-    prd_cat_id INT
+    prd_cat_id INT,
+    prd_size_id INT,
+    prd_size_name VARCHAR(100)
 );
 ALTER TABLE PRODUCTS ADD COLUMN company_name varchar(100) not null;
 ALTER TABLE products ADD COLUMN cat_name VARCHAR(100) NOT NULL;
@@ -24,10 +26,24 @@ ALTER TABLE products ADD CONSTRAINT fk_company FOREIGN KEY (prd_company_id) REFE
 
 CREATE TABLE IF NOT EXISTS categories (
     cat_code INT AUTO_INCREMENT PRIMARY KEY,
-    cat_description VARCHAR(100) NOT NULL
+    cat_description VARCHAR(100) NOT NULL,
+    is_active boolean default true
 );
 ALTER TABLE categories ADD COLUMN is_active boolean DEFAULT TRUE;
 
 CREATE TABLE IF NOT EXISTS company_data(
 company_code INT AUTO_INCREMENT PRIMARY KEY,
-company_description VARCHAR(100) NOT NULL);
+company_description VARCHAR(100) NOT NULL,
+address varchar(100),
+city varchar(100),
+short_name varchar(100),
+is_active boolean default true
+);
+
+############################    PRODUCT SIZE DATABASE    #########################
+
+CREATE TABLE IF NOT EXISTS prd_size(
+id INT AUTO_INCREMENT PRIMARY KEY,
+size_name VARCHAR(100) NOT NULL,
+is_active boolean default true
+);

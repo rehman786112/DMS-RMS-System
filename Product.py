@@ -19,19 +19,16 @@ def handle_errors(func):
         try:
             return func(self, *args, **kwargs)
         except Exception as e:
-            # Full traceback for debugging
             traceback.print_exc()
             
-            # Get action name
             action = func.__name__.replace("_", " ").strip().title()
             
-            # Plain language explanation
             explanation = "An unexpected error occurred."
             
             if isinstance(e, ValueError):
                 explanation = "One of the values entered isn't valid. Please check your input."
             elif isinstance(e, TypeError):
-                explanation = "The program used a value the wrong way internally. This is a code issue."
+                explanation = "The program used a value the wrong way internally."
             elif isinstance(e, (IndexError, KeyError)):
                 explanation = "Some data the program expected was missing or doesn't exist."
             elif isinstance(e, AttributeError):
@@ -44,7 +41,6 @@ def handle_errors(func):
             elif isinstance(e, InvalidOperation):
                 explanation = "Invalid number format. Please enter a valid decimal number."
             
-            # Show error message
             QMessageBox.critical(
                 self,
                 f"Error - {action}",
@@ -60,8 +56,11 @@ def handle_errors(func):
 
 
 def load_stylesheet():
-    with open('style.qss', 'r', encoding='utf-8') as f:
-        return f.read()
+    try:
+        with open('style.qss', 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
 
 
 db = DatabaseManager()
@@ -75,7 +74,6 @@ class Products(QMainWindow):
         self._selected_row = 0
         self.is_update = False
         
-        # Initialize UI with error handling
         try:
             self.setup_ui()
             self.setup_enter_navigation()
@@ -89,9 +87,11 @@ class Products(QMainWindow):
 
     def setup_enter_navigation(self):
         for widget in self.findChildren(QLineEdit):
-            widget.installEventFilter(self)
+            if widget.isEnabled():
+                widget.installEventFilter(self)
         for widget in self.findChildren(QComboBox):
-            widget.installEventFilter(self)
+            if widget.isEnabled():
+                widget.installEventFilter(self)
         for widget in self.findChildren(QTableView):
             widget.installEventFilter(self)
 
@@ -105,30 +105,63 @@ class Products(QMainWindow):
         return True
 
     def find_next_editable_widget(self, current_widget):
-        focus_widgets = []
-        for widget in self.findChildren(QWidget):
-            if widget.focusPolicy() != Qt.FocusPolicy.NoFocus:
-                if isinstance(widget, (QLineEdit, QComboBox, QPushButton, QCheckBox)):
-                    focus_widgets.append(widget)
-        
-        focus_widgets.sort(key=lambda w: w.tabOrder(w, w) if hasattr(w, 'tabOrder') else 0)
+        focus_order = [
+            self.p_name,
+            self.category_code_value,
+            self.company_code_value,
+            self.size_code_value,
+            self.unit,
+            self.pct_hs_code_value,
+            self.product_edit_view
+        ]
         
         try:
-            current_index = focus_widgets.index(current_widget)
+            current_index = focus_order.index(current_widget)
         except ValueError:
             return None
         
-        for i in range(current_index + 1, len(focus_widgets)):
-            next_widget = focus_widgets[i]
-            if self.is_widget_editable(next_widget):
-                return next_widget
-        
-        for i in range(0, current_index):
-            next_widget = focus_widgets[i]
-            if self.is_widget_editable(next_widget):
-                return next_widget
+        for i in range(current_index + 1, len(focus_order)):
+            next_widget = focus_order[i]
+            if isinstance(next_widget, QLineEdit):
+                if not next_widget.isReadOnly() and next_widget.isEnabled():
+                    return next_widget
+            elif isinstance(next_widget, QComboBox):
+                if next_widget.isEnabled():
+                    return next_widget
+            elif isinstance(next_widget, QTableView):
+                if next_widget.isEnabled():
+                    return next_widget
         
         return None
+
+    def auto_capitalize_input(self, widget):
+        text = widget.text()
+        if text and len(text) > 0:
+            widget.blockSignals(True)
+            cursor_pos = widget.cursorPosition()
+            words = text.split(' ')
+            capitalized_words = []
+            for word in words:
+                if word:
+                    capitalized_words.append(word[0].upper() + word[1:].lower())
+                else:
+                    capitalized_words.append('')
+            new_text = ' '.join(capitalized_words)
+            if new_text != text:
+                widget.setText(new_text)
+                widget.setCursorPosition(cursor_pos)
+            widget.blockSignals(False)
+
+    def auto_uppercase_input(self, widget):
+        text = widget.text()
+        if text:
+            cursor_pos = widget.cursorPosition()
+            new_text = text.upper()
+            if new_text != text:
+                widget.blockSignals(True)
+                widget.setText(new_text)
+                widget.setCursorPosition(cursor_pos)
+                widget.blockSignals(False)
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.KeyPress:
@@ -136,32 +169,23 @@ class Products(QMainWindow):
             
             if isinstance(obj, QLineEdit):
                 if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    if obj == self.product_name_search:
+                        return True
+                    
                     if self.is_widget_editable(obj):
                         next_widget = self.find_next_editable_widget(obj)
                         if next_widget:
                             next_widget.setFocus()
                             if isinstance(next_widget, QLineEdit):
                                 next_widget.selectAll()
+                            elif isinstance(next_widget, QTableView):
+                                self.product_edit_view.setCurrentIndex(
+                                    self.product_edit_model.index(0, 1)
+                                )
+                        return True
                     return True
-                
-                if obj == self.product_name_search:
-                    row_count = self._search_proxy.rowCount() if hasattr(self, '_search_proxy') else 0
-                    if row_count == 0:
-                        return super().eventFilter(obj, event)
-                    
-                    current_index = self.product_detail_view.currentIndex()
-                    current_row = current_index.row() if current_index.isValid() else -1
-                    
-                    if key == Qt.Key.Key_Up:
-                        new_row = current_row - 1 if current_row > 0 else row_count - 1
-                        self.select_table_row(self.product_detail_view, new_row, self._search_proxy)
-                        return True
-                    elif key == Qt.Key.Key_Down:
-                        new_row = current_row + 1 if current_row < row_count - 1 else 0
-                        self.select_table_row(self.product_detail_view, new_row, self._search_proxy)
-                        return True
             
-            elif isinstance(obj, QComboBox):
+            if isinstance(obj, QComboBox):
                 if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                     if self.is_widget_editable(obj):
                         next_widget = self.find_next_editable_widget(obj)
@@ -169,33 +193,96 @@ class Products(QMainWindow):
                             next_widget.setFocus()
                             if isinstance(next_widget, QLineEdit):
                                 next_widget.selectAll()
+                            elif isinstance(next_widget, QTableView):
+                                self.product_edit_view.setCurrentIndex(
+                                    self.product_edit_model.index(0, 1)
+                                )
+                        return True
+            
+            if isinstance(obj, QLineEdit) and obj == self.product_name_search:
+                row_count = self._search_proxy.rowCount() if hasattr(self, '_search_proxy') else 0
+                if row_count == 0:
+                    return super().eventFilter(obj, event)
+                
+                current_index = self.product_detail_view.currentIndex()
+                current_row = current_index.row() if current_index.isValid() else -1
+                
+                if key == Qt.Key.Key_Up:
+                    new_row = current_row - 1 if current_row > 0 else row_count - 1
+                    self.select_table_row(self.product_detail_view, new_row, self._search_proxy)
+                    return True
+                elif key == Qt.Key.Key_Down:
+                    new_row = current_row + 1 if current_row < row_count - 1 else 0
+                    self.select_table_row(self.product_detail_view, new_row, self._search_proxy)
                     return True
             
-            elif isinstance(obj, QTableView):
-                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                    current_index = obj.currentIndex()
-                    if current_index.isValid() and obj == self.product_detail_view:
-                        self.on_product_select(current_index)
-                    return True
-                
+            if isinstance(obj, QTableView):
                 if obj == self.product_detail_view:
-                    current_index = obj.currentIndex()
-                    if current_index.isValid():
-                        row = current_index.row()
-                        col = current_index.column()
-                        
-                        if key == Qt.Key.Key_Up:
-                            new_row = max(0, row - 1)
+                    if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                        current_index = obj.currentIndex()
+                        if current_index.isValid():
+                            self.on_product_select(current_index)
+                        return True
+                    
+                    if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+                        current_index = obj.currentIndex()
+                        if current_index.isValid():
+                            row = current_index.row()
+                            col = current_index.column()
+                            if key == Qt.Key.Key_Up:
+                                new_row = max(0, row - 1)
+                            else:
+                                new_row = min(obj.model().rowCount() - 1, row + 1)
                             if new_row != row:
                                 obj.setCurrentIndex(obj.model().index(new_row, col))
                             return True
-                        elif key == Qt.Key.Key_Down:
-                            new_row = min(obj.model().rowCount() - 1, row + 1)
+                
+                elif obj == self.product_edit_view:
+                    current_index = obj.currentIndex()
+                    
+                    if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                        if current_index.isValid():
+                            row = current_index.row()
+                            col = current_index.column()
+                            if col not in [0, 2]:
+                                obj.edit(current_index)
+                            return True
+                    
+                    if key == Qt.Key.Key_Left:
+                        if current_index.isValid():
+                            row = current_index.row()
+                            col = current_index.column()
+                            new_col = col - 1
+                            while new_col >= 0 and new_col in [0, 2]:
+                                new_col -= 1
+                            if new_col >= 0:
+                                obj.setCurrentIndex(self.product_edit_model.index(row, new_col))
+                            return True
+                    
+                    if key == Qt.Key.Key_Right:
+                        if current_index.isValid():
+                            row = current_index.row()
+                            col = current_index.column()
+                            new_col = col + 1
+                            while new_col < self.product_edit_model.columnCount() and new_col in [0, 2]:
+                                new_col += 1
+                            if new_col < self.product_edit_model.columnCount():
+                                obj.setCurrentIndex(self.product_edit_model.index(row, new_col))
+                            return True
+                    
+                    if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+                        if current_index.isValid():
+                            row = current_index.row()
+                            col = current_index.column()
+                            if key == Qt.Key.Key_Up:
+                                new_row = max(0, row - 1)
+                            else:
+                                new_row = min(obj.model().rowCount() - 1, row + 1)
                             if new_row != row:
-                                obj.setCurrentIndex(obj.model().index(new_row, col))
+                                obj.setCurrentIndex(self.product_edit_model.index(new_row, col))
                             return True
             
-            elif isinstance(obj, QPushButton):
+            if isinstance(obj, QPushButton):
                 if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and obj.isEnabled():
                     obj.click()
                     return True
@@ -310,21 +397,22 @@ class Products(QMainWindow):
 
         self.p_name_input, self.p_name = self.create_input_field("Product Name:")
         self.p_name.textChanged.connect(self.on_update_product_name)
+        self.p_name.textChanged.connect(lambda: self.auto_uppercase_input(self.p_name))
         self.p_name.setFixedWidth(500)
         self.p_name_input.setObjectName("ProductName")
         self.p_name_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.product_name_layout.addWidget(self.product_desc_label_widget)
         self.product_name_layout.addWidget(self.p_name_input, alignment=Qt.AlignmentFlag.AlignLeft)
 
-        # Category and Company only
-        self.category_company_widget = QWidget()
-        self.category_company_layout = QVBoxLayout(self.category_company_widget)
+        # Category, Company and Size
+        self.category_company_size_widget = QWidget()
+        self.category_company_size_layout = QVBoxLayout(self.category_company_size_widget)
 
-        self.category_company_label = self.create_header("Category / Company", 'MainLabel', '20px')
-        self.category_company_label.setFixedSize(250, 30)
+        self.category_company_size_label = self.create_header("Category / Company / Size", 'MainLabel', '20px')
+        self.category_company_size_label.setFixedSize(350, 30)
 
-        self.category_company_input_widget = QWidget()
-        self.category_company_input_layout = QGridLayout(self.category_company_input_widget)
+        self.category_company_size_input_widget = QWidget()
+        self.category_company_size_input_layout = QGridLayout(self.category_company_size_input_widget)
 
         # Category fields
         self.category_code, self.category_code_value = self.create_input_field("Category")
@@ -337,6 +425,12 @@ class Products(QMainWindow):
         self.company_code_value.textChanged.connect(lambda: self.on_text_change("company"))
         self.company_name, self.company_name_value = self.create_input_field("Name")
         self.company_name_value.setReadOnly(True)
+
+        # Product Size fields
+        self.size_code, self.size_code_value = self.create_input_field("Size ID")
+        self.size_code_value.textChanged.connect(lambda: self.on_text_change("size"))
+        self.size_name, self.size_name_value = self.create_input_field("Size Name")
+        self.size_name_value.setReadOnly(True)
 
         # Unit field
         self.unit_widget = QWidget()
@@ -354,27 +448,38 @@ class Products(QMainWindow):
 
         # PCT/HS Code
         self.pct_hs_code, self.pct_hs_code_value = self.create_input_field("PCT / HS Code")
+        self.pct_hs_code_value.textChanged.connect(lambda: self.auto_capitalize_input(self.pct_hs_code_value))
 
         # Add buttons for new records
         self.add_category_btn = self.create_add_button()
         self.add_category_btn.clicked.connect(lambda: self.add_new("Category"))
+        
         self.add_company_btn = self.create_add_button()
         self.add_company_btn.clicked.connect(lambda: self.add_new("company"))
+        
+        self.add_size_btn = self.create_add_button()
+        self.add_size_btn.clicked.connect(lambda: self.add_new("size"))
 
-        # Layout for category and company
-        self.category_company_input_layout.addWidget(self.category_code, 0, 0)
-        self.category_company_input_layout.addWidget(self.category_name, 0, 1)
-        self.category_company_input_layout.addWidget(self.add_category_btn, 0, 2)
-        self.category_company_input_layout.addWidget(self.company_code, 1, 0)
-        self.category_company_input_layout.addWidget(self.company_name, 1, 1)
-        self.category_company_input_layout.addWidget(self.add_company_btn, 1, 2)
-        self.category_company_input_layout.addWidget(self.unit_widget, 2, 0)
-        self.category_company_input_layout.addWidget(self.pct_hs_code, 2, 1)
+        # Layout for category, company and size
+        self.category_company_size_input_layout.addWidget(self.category_code, 0, 0)
+        self.category_company_size_input_layout.addWidget(self.category_name, 0, 1)
+        self.category_company_size_input_layout.addWidget(self.add_category_btn, 0, 2)
+        
+        self.category_company_size_input_layout.addWidget(self.company_code, 1, 0)
+        self.category_company_size_input_layout.addWidget(self.company_name, 1, 1)
+        self.category_company_size_input_layout.addWidget(self.add_company_btn, 1, 2)
+        
+        self.category_company_size_input_layout.addWidget(self.size_code, 2, 0)
+        self.category_company_size_input_layout.addWidget(self.size_name, 2, 1)
+        self.category_company_size_input_layout.addWidget(self.add_size_btn, 2, 2)
+        
+        self.category_company_size_input_layout.addWidget(self.unit_widget, 3, 0)
+        self.category_company_size_input_layout.addWidget(self.pct_hs_code, 3, 1)
 
-        self.category_company_layout.addWidget(self.category_company_label)
-        self.category_company_layout.addWidget(self.category_company_input_widget, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.category_company_size_layout.addWidget(self.category_company_size_label)
+        self.category_company_size_layout.addWidget(self.category_company_size_input_widget, alignment=Qt.AlignmentFlag.AlignLeft)
 
-        # Product edit table view
+        # Product edit table view (9 columns)
         self.product_edit_view = QTableView()
         self.product_edit_model = QStandardItemModel(1, 9)
         self.product_edit_model.setHorizontalHeaderLabels([
@@ -383,7 +488,7 @@ class Products(QMainWindow):
         ])
         self.product_edit_view.verticalHeader().setVisible(False)
         self.product_edit_view.setModel(self.product_edit_model)
-        self.product_edit_view.setEditTriggers(QTableView.EditTrigger.DoubleClicked)
+        self.product_edit_view.setEditTriggers(QTableView.EditTrigger.DoubleClicked | QTableView.EditTrigger.EditKeyPressed)
 
         self.product_edit_model.setItem(0, 0, self.create_item(None, readonly=True))
         self.product_edit_model.setItem(0, 2, self.create_item(None, readonly=True))
@@ -394,7 +499,7 @@ class Products(QMainWindow):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
         self.product_desc_layout.addWidget(self.product_name_widget)
-        self.product_desc_layout.addWidget(self.category_company_widget)
+        self.product_desc_layout.addWidget(self.category_company_size_widget)
         self.product_desc_layout.addWidget(self.product_edit_view)
 
         self.product_main_layout.addWidget(self.product_desc)
@@ -495,7 +600,6 @@ class Products(QMainWindow):
 
     @handle_errors
     def on_update_product_name(self, text=""):
-        """Update product name in table when user types"""
         item = self.product_edit_model.item(0, 2)
         if item is None:
             item = self.create_item("")
@@ -584,10 +688,12 @@ class Products(QMainWindow):
         cursor.execute("""
                 SELECT p.prd_name, 
                        c.cat_description, p.prd_cat_id,
-                       comp.company_description, p.prd_company_id
+                       comp.company_description, p.prd_company_id,
+                       s.size_name, p.prd_size_id
                 FROM products p
                 LEFT JOIN categories c ON p.prd_cat_id = c.cat_code
                 LEFT JOIN company_data comp ON p.prd_company_id = comp.company_code
+                LEFT JOIN prd_size s ON p.prd_size_id = s.id
                 WHERE p.prd_id = %s
             """, (product_id,))
         product_company_data = cursor.fetchone()
@@ -600,11 +706,15 @@ class Products(QMainWindow):
             category_name = product_company_data.get('cat_description', '')
             company_id = product_company_data.get('prd_company_id')
             company_name = product_company_data.get('company_description', '')
+            size_id = product_company_data.get('prd_size_id')
+            size_name = product_company_data.get('size_name', '')
 
             self.category_code_value.setText(str(category_id) if category_id is not None else "")
             self.category_name_value.setText(category_name)
             self.company_code_value.setText(str(company_id) if company_id is not None else "")
             self.company_name_value.setText(company_name)
+            self.size_code_value.setText(str(size_id) if size_id is not None else "")
+            self.size_name_value.setText(size_name)
         except Exception:
             QMessageBox.critical(self, "Error", "Error loading product in edit view.")
             return
@@ -613,7 +723,8 @@ class Products(QMainWindow):
         self.p_name.setText(product_data.get("prd_name", ""))
 
         columns = ["prd_id", "prd_code", "prd_name", "prd_carton_size",
-                   "prd_cost_price", "prd_sale_price", "prd_reorder", "prd_barcode", "prd_is_active"]
+                   "prd_cost_price", "prd_sale_price", "prd_reorder", 
+                   "prd_barcode", "prd_is_active"]
 
         for col, key in enumerate(columns):
             value = product_data.get(key)
@@ -645,12 +756,15 @@ class Products(QMainWindow):
                 self.refresh_view()
 
     @handle_errors
-    def refresh_view(self):
+    def refresh_view(self, checked=False):
         self.p_name.setText("")
         self.category_name_value.setText("")
         self.category_code_value.setText("")
         self.company_name_value.setText("")
         self.company_code_value.setText("")
+        self.size_name_value.setText("")
+        self.size_code_value.setText("")
+        self.pct_hs_code_value.setText("")
         
         for col in range(self.product_edit_model.columnCount()):
             if col == 0:
@@ -667,13 +781,14 @@ class Products(QMainWindow):
         self.p_name.setFocus()
 
     @handle_errors
-    def clear_all_inputs(self):
-        """Clear all input fields and reset form"""
+    def clear_all_inputs(self, checked=False):
         self.p_name.setText("")
         self.category_code_value.setText("")
         self.category_name_value.setText("")
         self.company_code_value.setText("")
         self.company_name_value.setText("")
+        self.size_code_value.setText("")
+        self.size_name_value.setText("")
         self.pct_hs_code_value.setText("")
         
         for col in range(self.product_edit_model.columnCount()):
@@ -692,7 +807,6 @@ class Products(QMainWindow):
 
     @handle_errors
     def save_data(self, checked=False):
-        """Save product data - checked parameter for button signal"""
         if self._is_saving:
             return
 
@@ -728,6 +842,7 @@ class Products(QMainWindow):
 
             category_id_text = self.category_code_value.text().strip()
             company_id_text = self.company_code_value.text().strip()
+            size_id_text = self.size_code_value.text().strip()
 
             if not category_id_text:
                 QMessageBox.warning(self, "Validation Error", "Please select a Category.")
@@ -740,8 +855,9 @@ class Products(QMainWindow):
             try:
                 category_id = int(category_id_text)
                 company_id = int(company_id_text)
+                size_id_val = int(size_id_text) if size_id_text else None
             except ValueError:
-                QMessageBox.warning(self, "Validation Error", "Invalid Category or Company ID.")
+                QMessageBox.warning(self, "Validation Error", "Invalid Category, Company or Size ID.")
                 return
 
             if carton_size is not None:
@@ -789,12 +905,23 @@ class Products(QMainWindow):
 
             conn, cursor = db.get_connection()
             if product_id is None or product_id == "":
-                query = """INSERT INTO products (prd_id, prd_code, prd_name, prd_carton_size, prd_cost_price, prd_sale_price, prd_reorder, prd_barcode, prd_is_active, prd_company_id, prd_cat_id, company_name, cat_name) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
-                values = (product_id, product_code, product_name, carton_size, unit_cost_price, unit_sale_price, re_order, barcode, is_active, company_id, category_id, company_name, cat_name)
+                query = """INSERT INTO products (prd_id, prd_code, prd_name, prd_carton_size, 
+                          prd_cost_price, prd_sale_price, prd_reorder, prd_barcode, prd_is_active, 
+                          prd_company_id, prd_cat_id, prd_size_id, company_name, cat_name) 
+                          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+                values = (product_id, product_code, product_name, carton_size, unit_cost_price, 
+                         unit_sale_price, re_order, barcode, is_active, company_id, category_id, 
+                         size_id_val, company_name, cat_name)
                 message = "Data Inserted Successfully."
             else:
-                query = """UPDATE products SET prd_code = %s, prd_name = %s, prd_carton_size = %s, prd_cost_price = %s, prd_sale_price = %s, prd_reorder = %s, prd_barcode = %s, prd_is_active = %s, prd_company_id = %s, prd_cat_id = %s, company_name = %s, cat_name = %s WHERE prd_id = %s"""
-                values = (product_code, product_name, carton_size, unit_cost_price, unit_sale_price, re_order, barcode, is_active, company_id, category_id, company_name, cat_name, product_id)
+                query = """UPDATE products SET prd_code = %s, prd_name = %s, prd_carton_size = %s, 
+                          prd_cost_price = %s, prd_sale_price = %s, prd_reorder = %s, prd_barcode = %s, 
+                          prd_is_active = %s, prd_company_id = %s, prd_cat_id = %s, 
+                          prd_size_id = %s, company_name = %s, cat_name = %s 
+                          WHERE prd_id = %s"""
+                values = (product_code, product_name, carton_size, unit_cost_price, unit_sale_price, 
+                         re_order, barcode, is_active, company_id, category_id, 
+                         size_id_val, company_name, cat_name, product_id)
                 message = "Data Updated Successfully."
             
             cursor.execute(query, values)
@@ -803,7 +930,6 @@ class Products(QMainWindow):
             self.refresh_view()
 
         except Exception as e:
-            # Let decorator handle it
             raise
         finally:
             self._is_saving = False
@@ -822,7 +948,7 @@ class Products(QMainWindow):
             if code.isdigit():
                 code = int(code)
                 conn, cursor = db.get_connection()
-                query = "SELECT company_description,is_active FROM company_data WHERE company_code = %s"
+                query = "SELECT company_description FROM company_data WHERE company_code = %s"
                 cursor.execute(query, (code,))
                 get_company_name = cursor.fetchone()
                 if get_company_name is None:
@@ -858,6 +984,29 @@ class Products(QMainWindow):
                 self.category_name_value.setText("")
                 self.category_name_value.setStyleSheet("border:none; color:grey;")
 
+        if sender_name == "size":
+            code = self.size_code_value.text()
+            if code == " ":
+                self.suggestion_widget = Suggestion(sender_name)
+                self.suggestion_widget.show()
+                self.size_code_value.setText("")
+                self.suggestion_widget.sent_data.connect(lambda data: self.on_receive_data(data, sender_name))
+            if code.isdigit():
+                code = int(code)
+                conn, cursor = db.get_connection()
+                query = "SELECT size_name FROM prd_size WHERE id = %s"
+                cursor.execute(query, (code,))
+                get_size_name = cursor.fetchone()
+                if get_size_name is None:
+                    self.size_name_value.setText("Invalid ID")
+                    self.size_name_value.setStyleSheet("border:1px solid red; color:red;")
+                else:
+                    self.size_name_value.setText(str(get_size_name['size_name']))
+                    self.size_name_value.setStyleSheet("border:none; color:grey;")
+            if code == "":
+                self.size_name_value.setText("")
+                self.size_name_value.setStyleSheet("border:none; color:grey;")
+
     @handle_errors
     def on_receive_data(self, data, sender_name):
         if sender_name == "category":
@@ -868,6 +1017,10 @@ class Products(QMainWindow):
             self.company_code_value.setText(str(data[0]))
             self.company_name_value.setText(str(data[1]))
             self.company_name_value.setStyleSheet("border:none; color:grey;")
+        if sender_name == "size":
+            self.size_code_value.setText(str(data[0]))
+            self.size_name_value.setText(str(data[1]))
+            self.size_name_value.setStyleSheet("border:none; color:grey;")
         self.suggestion_widget.close()
 
     @handle_errors
@@ -899,6 +1052,8 @@ class Suggestion(QWidget):
             self.data_model = TableModel("SELECT company_code, company_description FROM company_data")
         elif sender_name == "category":
             self.data_model = TableModel("SELECT cat_code, cat_description FROM categories")
+        elif sender_name == "size":
+            self.data_model = TableModel("SELECT id, size_name FROM prd_size")
 
         self.proxy = QSortFilterProxyModel()
         self.proxy.setSourceModel(self.data_model)
@@ -1005,6 +1160,7 @@ class AddDetails(QWidget):
         self.sender_name = sender_name
         self.company_id = None
         self.category_id = None
+        self.size_id = None
         self.row_data = []
         self._is_saving = False
 
@@ -1034,6 +1190,7 @@ class AddDetails(QWidget):
             self._detail_layout.addWidget(self.is_active_widget, alignment=Qt.AlignmentFlag.AlignRight)
 
             self.name_input_widget, self.name_input_value = self.create_input_field("Name")
+            self.name_input_value.textChanged.connect(lambda: self.auto_uppercase_input(self.name_input_value))
             self._detail_layout.addWidget(self.name_input_widget)
 
             self.address_input_widget = None
@@ -1053,6 +1210,8 @@ class AddDetails(QWidget):
                 self._detail_layout.addWidget(self.short_name_input_widget)
             elif sender_name == 'Category':
                 self.data_model = TableModel("SELECT * FROM categories")
+            elif sender_name == 'size':
+                self.data_model = TableModel("SELECT * FROM prd_size")
 
             self.existing_data_view = QTableView()
             self.existing_data_view.setWordWrap(True)
@@ -1080,6 +1239,17 @@ class AddDetails(QWidget):
                 "Initialization Error",
                 f"Failed to initialize AddDetails window:\n\n{type(e).__name__}: {e}"
             )
+
+    def auto_uppercase_input(self, widget):
+        text = widget.text()
+        if text:
+            cursor_pos = widget.cursorPosition()
+            new_text = text.upper()
+            if new_text != text:
+                widget.blockSignals(True)
+                widget.setText(new_text)
+                widget.setCursorPosition(cursor_pos)
+                widget.blockSignals(False)
 
     def create_header(self, label_name, object_name, font_size):
         header = QWidget()
@@ -1115,9 +1285,11 @@ class AddDetails(QWidget):
 
     def setup_enter_navigation(self):
         for widget in self.findChildren(QLineEdit):
-            widget.installEventFilter(self)
+            if widget.isEnabled():
+                widget.installEventFilter(self)
         for widget in self.findChildren(QComboBox):
-            widget.installEventFilter(self)
+            if widget.isEnabled():
+                widget.installEventFilter(self)
         self.existing_data_view.installEventFilter(self)
 
     def is_widget_editable(self, widget):
@@ -1134,9 +1306,10 @@ class AddDetails(QWidget):
         for widget in self.findChildren(QWidget):
             if widget.focusPolicy() != Qt.FocusPolicy.NoFocus:
                 if isinstance(widget, (QLineEdit, QComboBox, QPushButton, QCheckBox)):
-                    focus_widgets.append(widget)
+                    if self.is_widget_editable(widget):
+                        focus_widgets.append(widget)
         
-        focus_widgets.sort(key=lambda w: w.tabOrder(w, w) if hasattr(w, 'tabOrder') else 0)
+        focus_widgets.append(self.existing_data_view)
         
         try:
             current_index = focus_widgets.index(current_widget)
@@ -1145,12 +1318,12 @@ class AddDetails(QWidget):
         
         for i in range(current_index + 1, len(focus_widgets)):
             next_widget = focus_widgets[i]
-            if self.is_widget_editable(next_widget):
+            if self.is_widget_editable(next_widget) or isinstance(next_widget, QTableView):
                 return next_widget
         
         for i in range(0, current_index):
             next_widget = focus_widgets[i]
-            if self.is_widget_editable(next_widget):
+            if self.is_widget_editable(next_widget) or isinstance(next_widget, QTableView):
                 return next_widget
         
         return None
@@ -1159,7 +1332,7 @@ class AddDetails(QWidget):
         if event.type() == QEvent.Type.KeyPress:
             key = event.key()
             
-            if isinstance(obj, QLineEdit):
+            if isinstance(obj, (QLineEdit, QComboBox)):
                 if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                     if self.is_widget_editable(obj):
                         next_widget = self.find_next_editable_widget(obj)
@@ -1167,14 +1340,6 @@ class AddDetails(QWidget):
                             next_widget.setFocus()
                             if isinstance(next_widget, QLineEdit):
                                 next_widget.selectAll()
-                    return True
-            
-            elif isinstance(obj, QComboBox):
-                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                    if self.is_widget_editable(obj):
-                        next_widget = self.find_next_editable_widget(obj)
-                        if next_widget:
-                            next_widget.setFocus()
                     return True
             
             elif isinstance(obj, QTableView):
@@ -1230,12 +1395,16 @@ class AddDetails(QWidget):
                 self.name_input_value.setText(str(self.row_data[1]) if self.row_data[1] is not None else "")
                 active = self.row_data[2] if len(self.row_data) > 2 else 1
                 self.is_active_widget.setChecked(active in (1, True, "1"))
+            elif self.sender_name == "size":
+                self.size_id = int(self.row_data[0])
+                self.name_input_value.setText(str(self.row_data[1]) if self.row_data[1] is not None else "")
+                active = self.row_data[2] if len(self.row_data) > 2 else 1
+                self.is_active_widget.setChecked(active in (1, True, "1"))
         except (ValueError, TypeError, IndexError):
             QMessageBox.warning(self, "Error", "Error loading record data.")
 
     @handle_errors
     def save_data(self, checked=False):
-        """Save data - checked parameter for button signal"""
         if self._is_saving:
             return
         is_update = False
@@ -1269,7 +1438,6 @@ class AddDetails(QWidget):
                 conn.commit()
                 QMessageBox.information(self, "Success", message)
                 self.refresh_data()
-                
 
             elif self.sender_name == "Category":
                 category_name = self.name_input_value.text().strip()
@@ -1293,9 +1461,31 @@ class AddDetails(QWidget):
                 conn.commit()
                 self.refresh_data()
                 QMessageBox.information(self, 'Success', message)
+
+            elif self.sender_name == "size":
+                size_name = self.name_input_value.text().strip()
+                if not size_name:
+                    QMessageBox.warning(self, "Validation Error", "Size Name is required.")
+                    return
+
+                is_active = self.is_active_widget.isChecked()
+                if self.size_id is not None and self.size_id != "":
+                    is_update = True
+                    message = 'Record Updated Success..'
+                
+                conn, cursor = db.get_connection()
+                if is_update:
+                    query = 'UPDATE prd_size SET size_name=%s, is_active = %s WHERE id = %s'
+                    values = (size_name, is_active, self.size_id)
+                else:
+                    query = """INSERT INTO prd_size (id, size_name, is_active) VALUES (%s, %s, %s)"""
+                    values = (self.size_id, size_name, is_active)
+                cursor.execute(query, values)
+                conn.commit()
+                self.refresh_data()
+                QMessageBox.information(self, 'Success', message)
                 
         except Exception as e:
-            # Let decorator handle it
             raise
         finally:
             self._is_saving = False
@@ -1386,6 +1576,10 @@ class AddDetails(QWidget):
             self.data_model._load_data("SELECT * FROM categories")
             self.name_input_value.setText("")
             self.category_id = None
+        elif self.sender_name == "size":
+            self.data_model._load_data("SELECT * FROM prd_size")
+            self.name_input_value.setText("")
+            self.size_id = None
         self.is_active_widget.setChecked(True)
 
 
