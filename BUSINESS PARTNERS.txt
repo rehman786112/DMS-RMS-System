@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS customers (
     cus_whatsapp VARCHAR(20),
     phone varchar(100),
     cus_date DATE DEFAULT (CURRENT_DATE),
-    is_synced BOOLEAN DEFAULT TRUE
+    is_synced BOOLEAN DEFAULT TRUE,
+    updated_at DATE DEFAULT (CURRENT_DATE)
 );
 
 ================ DESCRIBE Customers =============
