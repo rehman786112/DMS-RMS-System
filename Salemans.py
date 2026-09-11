@@ -238,7 +238,7 @@ class Salemans(QWidget):
     # ================================================================
     def load_types(self):
         try:
-            rows = self.execute_query("SELECT type_name FROM salesmen_type WHERE is_active = true ORDER BY type_name")
+            rows = self.execute_query("SELECT type_name FROM salesmen_type ORDER BY type_name")
             self.type_data = [str(r['type_name']) for r in rows]
         except Exception as e:
             print(f"load_types error: {e}")
@@ -354,6 +354,7 @@ class Salemans(QWidget):
         self.code_widget, self.code_input = self.create_input_field("*Code", "Salesman Code..")
         self.code_input.setEnabled(False)
         self.name_widget, self.name_input = self.create_input_field("*Name", "Enter Salesman name....")
+        self.name_input.textChanged.connect(lambda: self.name_input.setText(self.name_input.text().upper()))
         self.address_widget, self.address_input = self.create_input_field("*Address", "Enter Salesman address....")
         self.city_widget, self.city_input = self.create_input_field("*City", "Enter City....")
         self.country_widget, self.country_input = self.create_input_field("Country", "Enter country....")

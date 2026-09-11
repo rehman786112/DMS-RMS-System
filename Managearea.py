@@ -173,6 +173,7 @@ class ManageAreas(QWidget):
         # Area name field
         self.area_name_widget, self.area_name_input = self.create_input_field("Area Name *")
         self.area_name_input.setPlaceholderText("Enter area name...")
+        self.area_name_input.textChanged.connect(lambda: self.area_name_input.setText(self.area_name_input.text().upper()))
         input_layout.addWidget(self.area_name_widget)
 
         # Active status
@@ -187,6 +188,7 @@ class ManageAreas(QWidget):
 
         self.area_save_btn = QPushButton("Save")
         self.area_save_btn.setFixedHeight(40)
+        self.area_save_btn.setToolTip("Save Area (Ctrl+S)")
         self.area_save_btn.setStyleSheet("""
             QPushButton {
                 background: #22C55E;
@@ -230,6 +232,12 @@ class ManageAreas(QWidget):
         input_layout.addLayout(button_layout)
 
         input_layout.addStretch()
+
+        # ---- Ctrl+S shortcut for Save (Areas tab) ----
+        self.area_save_shortcut = QShortcut(QKeySequence("Ctrl+S"), self.areas_tab)
+        self.area_save_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.area_save_shortcut.activated.connect(self.save_area)
+        # ---------------------------------------------
 
         # Right side - Table with search
         table_widget = QWidget()
@@ -371,6 +379,7 @@ class ManageAreas(QWidget):
         # Sub area name field
         self.subarea_name_widget, self.subarea_name_input = self.create_input_field("Sub Area*")
         self.subarea_name_input.setPlaceholderText("Enter sub area name...")
+        self.subarea_name_input.textChanged.connect(lambda: self.subarea_name_input.setText(self.subarea_name_input.text().upper()))
         input_layout.addWidget(self.subarea_name_widget)
 
         # Active status
@@ -385,6 +394,7 @@ class ManageAreas(QWidget):
 
         self.subarea_save_btn = QPushButton("Save")
         self.subarea_save_btn.setFixedHeight(40)
+        self.subarea_save_btn.setToolTip("Save Sub Area (Ctrl+S)")
         self.subarea_save_btn.setStyleSheet("""
             QPushButton {
                 background: #22C55E;
@@ -428,6 +438,12 @@ class ManageAreas(QWidget):
         input_layout.addLayout(button_layout)
 
         input_layout.addStretch()
+
+        # ---- Ctrl+S shortcut for Save (Sub Areas tab) ----
+        self.subarea_save_shortcut = QShortcut(QKeySequence("Ctrl+S"), self.subareas_tab)
+        self.subarea_save_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.subarea_save_shortcut.activated.connect(self.save_subarea)
+        # --------------------------------------------------
 
         # Right side - Table with search
         table_widget = QWidget()
@@ -676,14 +692,14 @@ class ManageAreas(QWidget):
             QMessageBox.critical(self, "Error", f"An error occurred: {str(e)}")
 
     @handle_errors
-    def refresh_areas(self):
+    def refresh_areas(self, checked=False):
         """Refresh area table."""
         self.area_model.load_data()
         self.area_search_input.clear()
         self.area_table.clearSelection()
 
     @handle_errors
-    def clear_area_form(self):
+    def clear_area_form(self, checked=False):
         """Clear area form."""
         self.area_id_input.clear()
         self.area_name_input.clear()
@@ -767,14 +783,14 @@ class ManageAreas(QWidget):
             QMessageBox.critical(self, "Error", f"An error occurred: {str(e)}")
 
     @handle_errors
-    def refresh_subareas(self):
+    def refresh_subareas(self, checked=False):
         """Refresh subarea table."""
         self.subarea_model.load_data()
         self.subarea_search_input.clear()
         self.subarea_table.clearSelection()
 
     @handle_errors
-    def clear_subarea_form(self):
+    def clear_subarea_form(self, checked=False):
         """Clear subarea form."""
         self.subarea_id_input.clear()
         self.subarea_area_combo.setCurrentIndex(0)

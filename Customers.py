@@ -10,6 +10,7 @@ import traceback
 import logging
 import functools
 from Add_Types import AddDetails
+import uuid
 
 logging.basicConfig(
     level=logging.ERROR,
@@ -168,6 +169,7 @@ class Customers(QWidget):
             self.sub_areas_data = []
             self.customer_code = None
             self.is_update = False
+            self.sync_uuid = None
 
             # 2. current date
             self.current_date = datetime.now().strftime("%d-%m-%y")
@@ -354,12 +356,15 @@ class Customers(QWidget):
         self.code_widget, self.code_input = self.create_input_field("*Code", "Customer Code..")
         self.code_input.setEnabled(False)
         self.name_widget, self.name_input = self.create_input_field("*Name", "Enter customer name....")
+        self.name_input.textChanged.connect(lambda: self.name_input.setText(self.name_input.text().upper()))
         self.address_widget, self.address_input = self.create_input_field("*Address", "Enter customer address....")
         self.city_widget, self.city_input = self.create_input_field("*City", "Enter City....")
         self.country_widget, self.country_input = self.create_input_field("Country", "Enter country....")
         self.phone_widget, self.phone_input = self.create_input_field("*Phone", "Enter Customer Phone number..")
-        self.whatsapp_widget, self.whatsapp_input = self.create_input_field("WhatsApp", "Enter WhatsApp number..")
-        self.email_widget, self.email_input = self.create_input_field("*Email", "Enter Customer Email...")
+        # WhatsApp is optional — no asterisk, clearer placeholder
+        self.whatsapp_widget, self.whatsapp_input = self.create_input_field("WhatsApp", "Enter WhatsApp number (optional)..")
+        # Email is optional — no asterisk, clearer placeholder
+        self.email_widget, self.email_input = self.create_input_field("Email", "Enter Customer Email (optional)...")
         self.type_widget, self.type_input = self.create_combo_field("*Type", self.type_data, self.TYPE_PLACEHOLDER)
 
         self.detail_layout.addWidget(self.code_widget, 0, 0)
@@ -567,7 +572,7 @@ class Customers(QWidget):
 
         self.code_input.setText(str(customer_data.get('cus_code', '')))
         self.name_input.setText(str(customer_data.get('cus_name', '')))
-        self.email_input.setText(str(customer_data.get('cus_email', '')))
+        self.email_input.setText(str(customer_data.get('cus_email', '') or ''))
         self.address_input.setText(str(customer_data.get('cus_address', '')))
         self.city_input.setText(str(customer_data.get('cus_city', '')))
         self.country_input.setText(str(customer_data.get('cus_country', '')))
@@ -603,7 +608,7 @@ class Customers(QWidget):
             self.date_input.setText(self.current_date)
 
         self.phone_input.setText(str(customer_data.get('phone', '')))
-        self.whatsapp_input.setText(str(customer_data.get('cus_whatsapp', '')))
+        self.whatsapp_input.setText(str(customer_data.get('cus_whatsapp', '') or ''))
 
         self.is_update = True
         self.customer_code = int(customer_code)
@@ -630,12 +635,18 @@ class Customers(QWidget):
             errors.append("City is required")
         if not self.phone_input.text().strip():
             errors.append("Phone number is required")
-        if not self.email_input.text().strip():
-            errors.append("Email is required")
 
+        # ---- Email is OPTIONAL; validate format only if the user typed something ----
         email = self.email_input.text().strip()
         if email and ('@' not in email or '.' not in email):
             errors.append("Invalid email format")
+
+        # ---- WhatsApp is OPTIONAL; light format check only if filled ----
+        whatsapp = self.whatsapp_input.text().strip()
+        if whatsapp:
+            allowed = set("0123456789+- ()")
+            if not all(ch in allowed for ch in whatsapp):
+                errors.append("Invalid WhatsApp number format")
 
         date_text = self.date_input.text().strip()
         if date_text:
@@ -670,9 +681,14 @@ class Customers(QWidget):
         _date = parse_date(self.date_input.text().strip() or self.current_date)
         date = _date.strftime("%d-%m-%y")
 
+        # ---- Optional fields: convert empty strings to None (SQL NULL) ----
+        email_val = self.email_input.text().strip() or None
+        whatsapp_val = self.whatsapp_input.text().strip() or None
+        self.sync_uuid = str(uuid.uuid4()) if not self.sync_uuid else self.sync_uuid
+
         values_common = (
             self.name_input.text().strip(),
-            self.email_input.text().strip(),
+            email_val,
             self.address_input.text().strip(),
             self.city_input.text().strip(),
             self.country_input.text().strip(),
@@ -683,8 +699,10 @@ class Customers(QWidget):
             credit_limit,
             date,
             self.phone_input.text(),
-            self.whatsapp_input.text(),
+            whatsapp_val,
+            self.sync_uuid,
         )
+        
 
         if self.is_update:
             query = """
@@ -692,7 +710,7 @@ class Customers(QWidget):
                     cus_name=%s, cus_email=%s, cus_address=%s, cus_city=%s,
                     cus_country=%s, cus_type=%s, cus_cnic=%s, cus_area=%s,
                     cus_sub_area=%s, cus_credit_limit=%s, cus_date=%s,
-                    phone=%s, cus_whatsapp=%s
+                    phone=%s, cus_whatsapp=%s, sync_uuid=%s
                 WHERE cus_code=%s
             """
             values = values_common + (customer_id,)
@@ -702,8 +720,8 @@ class Customers(QWidget):
                 INSERT INTO customers (
                     cus_name, cus_email, cus_address, cus_city, cus_country,
                     cus_type, cus_cnic, cus_area, cus_sub_area,
-                    cus_credit_limit, cus_date, phone, cus_whatsapp
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    cus_credit_limit, cus_date, phone, cus_whatsapp,sync_uuid
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             values = values_common
             message = 'Record Added Success...'
@@ -732,7 +750,7 @@ class Customers(QWidget):
     # CLEAR / REFRESH
     # ================================================================
     @handle_errors
-    def clear_customer(self):
+    def clear_customer(self, checked=False):
         for field in (self.name_input, self.code_input, self.address_input, self.city_input,
                       self.country_input, self.phone_input, self.whatsapp_input,
                       self.email_input, self.cnic_input, self.credit_input):

@@ -5,6 +5,7 @@ from PyQt6.QtGui import *
 from database import DatabaseManager
 db = DatabaseManager()
 
+
 class Suggestion(QWidget):
     sent_data = pyqtSignal(list)
     
@@ -130,8 +131,15 @@ class Suggestion(QWidget):
         self.table_view.clicked.connect(self.on_row_select)
         self.table_view.setAlternatingRowColors(True)
         
+        # ---------- HEADER / COLUMN SIZING ----------
         header = self.table_view.horizontalHeader()
-        header.setMinimumSectionSize(100)
+        header.setMinimumSectionSize(80)
+
+        # Make all columns stretch to fill the table view equally.
+        # Whether there are 3 columns or 5, they will share the available width.
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header.setStretchLastSection(True)
+        # --------------------------------------------
         
         # If display_columns is provided, hide other columns
         if self.display_columns:
@@ -173,7 +181,9 @@ class Suggestion(QWidget):
             # Reload data from database directly into the model
             self.data_model.beginResetModel()
             try:
-                result = db.get_any_table(self.query)
+                conn, cursor = db.get_connection()
+                cursor.execute(self.query)
+                result = cursor.fetchall()
                 if result is None:
                     self.data_model._data = []
                     self.data_model._headers = []
@@ -204,6 +214,12 @@ class Suggestion(QWidget):
                         self.table_view.setColumnHidden(idx, True)
                     else:
                         self.table_view.setColumnHidden(idx, False)
+            
+            # ---- Re-apply stretch so columns always fit after refresh ----
+            header = self.table_view.horizontalHeader()
+            header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            header.setStretchLastSection(True)
+            # ---------------------------------------------------------------
             
             # Force the table view to update
             self.table_view.update()

@@ -3,11 +3,12 @@ from PyQt6.QtWidgets import *
 from PyQt6.QtGui import *
 from PyQt6.QtCore import *
 import sys
+import requests
 from decimal import Decimal, InvalidOperation
 from database import DatabaseManager
 import functools
 import traceback
-
+from image_uploader import ImageUploader
 
 # ============================================
 # ERROR HANDLING DECORATOR
@@ -66,6 +67,27 @@ def load_stylesheet():
 db = DatabaseManager()
 
 
+# ============================================
+# BACKGROUND UPLOAD WORKER
+# ============================================
+class UploadWorker(QThread):
+    """Background thread for image upload with REAL progress."""
+    progress_signal = pyqtSignal(int)           # percent (0-100)
+    finished_signal = pyqtSignal(bool, object)  # success, response
+
+    def __init__(self, image_path):
+        super().__init__()
+        self.image_path = image_path
+
+    def run(self):
+        result, response = ImageUploader.upload_image(
+            None,
+            self.image_path,
+            progress_callback=self.progress_signal.emit
+        )
+        self.finished_signal.emit(result, response)
+
+
 class Products(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -73,7 +95,14 @@ class Products(QMainWindow):
         self._current_product_id = None
         self._selected_row = 0
         self.is_update = False
-        
+        self.image_path = None
+        self.image_url = None
+
+        # ✅ Image upload state tracking
+        self._is_uploading = False
+        self._upload_worker = None
+        self.progress_bar = None
+
         try:
             self.setup_ui()
             self.setup_enter_navigation()
@@ -459,6 +488,66 @@ class Products(QMainWindow):
         
         self.add_size_btn = self.create_add_button()
         self.add_size_btn.clicked.connect(lambda: self.add_new("size"))
+        
+        # product image uploader preview and upload
+        self.image_uploader_widget = QWidget()
+        self.image_uploader_widget_layout = QVBoxLayout(self.image_uploader_widget) 
+        
+        # state for image upload
+        self.image_upload = False
+        # image preview label
+        self.image_preview_label = QLabel("Image Preview")
+        self.image_preview_label.setStyleSheet("font-size:16px; font-weight: 700; color: black;")
+        # previewer
+        self.image_preview = QLabel('No Image Selected')
+        self.image_preview.setFixedSize(200, 200)
+        self.image_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_preview.setStyleSheet(
+            "border: 2px dashed #b0b0b0; border-radius: 10px; "
+            "background: #fafafa; color: #888; font-size: 13px;"
+        )
+        self.image_preview_label.setBuddy(self.image_preview)
+        # image input to choose image
+        self.image_input = QPushButton("Choose Image")
+        self.image_input.setStyleSheet("""
+                                       QPushButton {
+                                           background-color: #2196F3;
+                                           color: white;
+                                           border-radius: 5px;
+                                           padding: 5px 10px;
+                                       }
+                                        QPushButton:hover {
+                                           background-color: #1976D2;
+                                       }
+                                       """)
+        self.image_input.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.image_input.clicked.connect(self.choose_image_dialouge)
+        # upload image button
+        self.upload_image_to_cloud_btn = QPushButton("Upload Image")
+        self.upload_image_to_cloud_btn.setStyleSheet("""
+        QPushButton {
+            background-color: #4CAF50;
+            color: white;
+            border-radius: 5px;
+            padding: 5px 10px;
+        }
+        QPushButton:hover {
+            background-color: #45a049;
+        }
+        QPushButton:disabled {
+            background-color: #cccccc;
+            color: #666666;
+        }
+        """)
+        self.upload_image_to_cloud_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.upload_image_to_cloud_btn.clicked.connect(self.upload_image_to_cloud)
+        self.upload_image_to_cloud_btn.setEnabled(False)
+
+        # add to layout
+        self.image_uploader_widget_layout.addWidget(self.image_preview_label)
+        self.image_uploader_widget_layout.addWidget(self.image_preview)
+        self.image_uploader_widget_layout.addWidget(self.image_input)
+        self.image_uploader_widget_layout.addWidget(self.upload_image_to_cloud_btn)
 
         # Layout for category, company and size
         self.category_company_size_input_layout.addWidget(self.category_code, 0, 0)
@@ -475,6 +564,7 @@ class Products(QMainWindow):
         
         self.category_company_size_input_layout.addWidget(self.unit_widget, 3, 0)
         self.category_company_size_input_layout.addWidget(self.pct_hs_code, 3, 1)
+        self.category_company_size_input_layout.addWidget(self.image_uploader_widget, 0, 3, 4, 1)
 
         self.category_company_size_layout.addWidget(self.category_company_size_label)
         self.category_company_size_layout.addWidget(self.category_company_size_input_widget, alignment=Qt.AlignmentFlag.AlignLeft)
@@ -503,6 +593,148 @@ class Products(QMainWindow):
         self.product_desc_layout.addWidget(self.product_edit_view)
 
         self.product_main_layout.addWidget(self.product_desc)
+
+    # ============================================
+    # IMAGE HANDLING
+    # ============================================
+    def _load_image_preview(self, image_url):
+        """Load image from URL (Cloudinary) or local path into preview label."""
+        if not image_url:
+            self.image_preview.clear()
+            self.image_preview.setText("No Image Selected")
+            self.image_preview.setStyleSheet(
+                "border: 2px dashed #b0b0b0; border-radius: 10px; "
+                "background: #fafafa; color: #888; font-size: 13px;"
+            )
+            return
+
+        try:
+            pixmap = QPixmap()
+
+            # Check karo local file hai ya URL
+            if image_url.startswith("http://") or image_url.startswith("https://"):
+                # Remote image — requests se download karo
+                response = requests.get(image_url, timeout=15)
+                response.raise_for_status()
+                pixmap.loadFromData(response.content)
+            else:
+                # Local file path
+                pixmap.load(image_url)
+
+            if pixmap.isNull():
+                print(f"Failed to load image (null pixmap): {image_url}")
+                self.image_preview.clear()
+                self.image_preview.setText("⚠ Image load failed")
+                return
+
+            scaled = pixmap.scaled(
+                self.image_preview.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            self.image_preview.setPixmap(scaled)
+            self.image_preview.setText("")
+            self.image_preview.setStyleSheet(
+                "border: 2px solid #2196F3; border-radius: 10px; "
+                "background: #ffffff;"
+            )
+        except Exception as e:
+            print(f"Error loading image preview: {e}")
+            self.image_preview.clear()
+            self.image_preview.setText("⚠ Image load failed")
+
+    def choose_image_dialouge(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Image", "",
+            "Image Files (*.png *.jpg *.jpeg *.bmp *.webp)"
+        )
+        if not file_path:
+            return
+
+        print(f"Selected image path: {file_path}")
+        self.image_path = file_path
+        self.image_url = None  # naya image select kiya, purana URL clear
+        self.image_upload = True
+        self._load_image_preview(file_path)
+        self.upload_image_to_cloud_btn.setEnabled(True)
+
+    def upload_image_to_cloud(self):
+        """Start image upload in a background thread with REAL progress bar."""
+        if not self.image_path:
+            QMessageBox.warning(self, "No Image", "Please choose an image first.")
+            return
+
+        # Already uploading? ignore
+        if self._is_uploading:
+            return
+
+        # ✅ Uploading state ON
+        self._is_uploading = True
+
+        # ✅ REAL progress bar (0 se 100)
+        self.progress_bar = QProgressDialog(
+            "Uploading image to cloud...",
+            None, 0, 100, self
+        )
+        self.progress_bar.setWindowTitle("Uploading Image")
+        self.progress_bar.setWindowModality(Qt.WindowModality.WindowModal)
+        self.progress_bar.setCancelButton(None)
+        self.progress_bar.setMinimumDuration(0)
+        self.progress_bar.setAutoClose(False)
+        self.progress_bar.setAutoReset(False)
+        self.progress_bar.setMinimumWidth(420)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setLabelText("Uploading image... 0%")
+        self.progress_bar.show()
+
+        # ✅ Buttons disable — save bhi disabled
+        self.upload_image_to_cloud_btn.setEnabled(False)
+        self.upload_image_to_cloud_btn.setText("Uploading...")
+        self.image_input.setEnabled(False)
+        self.footer_save_btn.setEnabled(False)
+        self.footer_refresh_btn.setEnabled(False)
+        self.footer_delete_btn.setEnabled(False)
+
+        # ✅ Worker start
+        self._upload_worker = UploadWorker(self.image_path)
+        self._upload_worker.progress_signal.connect(self._on_upload_progress)
+        self._upload_worker.finished_signal.connect(self._on_upload_finished)
+        self._upload_worker.start()
+
+    def _on_upload_progress(self, percent):
+        """Worker se aane wali real progress update karo."""
+        if self.progress_bar is not None:
+            self.progress_bar.setValue(percent)
+            self.progress_bar.setLabelText(f"Uploading image... {percent}%")
+
+    def _on_upload_finished(self, success, response):
+        """Upload complete hone par UI restore karo."""
+        # Progress 100 karke band karo
+        if self.progress_bar is not None:
+            if success:
+                self.progress_bar.setValue(100)
+                self.progress_bar.setLabelText("Uploading image... 100%")
+            self.progress_bar.close()
+            self.progress_bar = None
+
+        # ✅ Uploading state OFF
+        self._is_uploading = False
+
+        # ✅ Buttons restore
+        self.image_input.setEnabled(True)
+        self.footer_save_btn.setEnabled(True)
+        self.footer_refresh_btn.setEnabled(True)
+        self.footer_delete_btn.setEnabled(True)
+        self.upload_image_to_cloud_btn.setText("Upload Image")
+
+        if success:
+            QMessageBox.information(self, "Success", "Image uploaded successfully")
+            self.image_url = response
+            self.image_path = None
+            self.upload_image_to_cloud_btn.setEnabled(False)
+        else:
+            QMessageBox.critical(self, "Error", f"Image upload failed: {response}")
+            self.upload_image_to_cloud_btn.setEnabled(True)
 
     def create_input_field(self, label_name):
         input_widget = QWidget()
@@ -686,15 +918,11 @@ class Products(QMainWindow):
         
         conn, cursor = db.get_connection()
         cursor.execute("""
-                SELECT p.prd_name, 
-                       c.cat_description, p.prd_cat_id,
-                       comp.company_description, p.prd_company_id,
-                       s.size_name, p.prd_size_id
-                FROM products p
-                LEFT JOIN categories c ON p.prd_cat_id = c.cat_code
-                LEFT JOIN company_data comp ON p.prd_company_id = comp.company_code
-                LEFT JOIN prd_size s ON p.prd_size_id = s.id
-                WHERE p.prd_id = %s
+                SELECT prd_id, prd_code, prd_name, prd_carton_size, prd_cost_price, prd_sale_price,
+                       prd_reorder, prd_barcode, prd_is_active, prd_cat_id, prd_company_id, prd_size_id,
+                       image_url, prd_size_name, company_name, cat_name
+                FROM products
+                WHERE prd_id = %s
             """, (product_id,))
         product_company_data = cursor.fetchone()
         if product_company_data is None:
@@ -703,19 +931,32 @@ class Products(QMainWindow):
 
         try:
             category_id = product_company_data.get('prd_cat_id')
-            category_name = product_company_data.get('cat_description', '')
+            category_name = product_company_data.get('cat_name', '')
             company_id = product_company_data.get('prd_company_id')
-            company_name = product_company_data.get('company_description', '')
+            company_name = product_company_data.get('company_name', '')
             size_id = product_company_data.get('prd_size_id')
-            size_name = product_company_data.get('size_name', '')
+            size_name = product_company_data.get('prd_size_name', '')
+            image_url = product_company_data.get('image_url', '')
+
+            print(f'Image URL: {image_url}')
 
             self.category_code_value.setText(str(category_id) if category_id is not None else "")
-            self.category_name_value.setText(category_name)
+            self.category_name_value.setText(category_name if category_name else "")
             self.company_code_value.setText(str(company_id) if company_id is not None else "")
-            self.company_name_value.setText(company_name)
+            self.company_name_value.setText(company_name if company_name else "")
             self.size_code_value.setText(str(size_id) if size_id is not None else "")
-            self.size_name_value.setText(size_name)
-        except Exception:
+            self.size_name_value.setText(size_name if size_name else "")
+
+            # ✅ Image preview load karo (URL ya local, dono handle karta hai)
+            self._load_image_preview(image_url)
+
+            # State save karo taaki Save pe wahi URL jaaye
+            self.image_url = image_url if image_url else None
+            self.image_path = None
+            self.upload_image_to_cloud_btn.setEnabled(False)
+        except Exception as e:
+            print(f"Error loading product details: {e}")
+            traceback.print_exc()
             QMessageBox.critical(self, "Error", "Error loading product in edit view.")
             return
 
@@ -778,6 +1019,14 @@ class Products(QMainWindow):
             self.product_edit_model.setItem(0, col, item)
         
         self.view_model._load_data("SELECT prd_id, prd_name from products")
+
+        # Reset image section
+        self.image_url = None
+        self.image_path = None
+        self._load_image_preview(None)
+        self.upload_image_to_cloud_btn.setEnabled(False)
+
+        self._current_product_id = None
         self.p_name.setFocus()
 
     @handle_errors
@@ -802,12 +1051,25 @@ class Products(QMainWindow):
                 item = self.create_item(None)
             self.product_edit_model.setItem(0, col, item)
         
+        self.image_url = None
+        self.image_path = None
+        self._load_image_preview(None)
+        self.upload_image_to_cloud_btn.setEnabled(False)
+
         self._current_product_id = None
         self.p_name.setFocus()
 
     @handle_errors
     def save_data(self, checked=False):
         if self._is_saving:
+            return
+
+        # ✅ Agar image upload ho rahi ho to save mat karo
+        if self._is_uploading:
+            QMessageBox.warning(
+                self, "Please Wait",
+                "Image upload ho rahi hai. Complete hone ke baad save karein."
+            )
             return
 
         self._is_saving = True
@@ -843,6 +1105,7 @@ class Products(QMainWindow):
             category_id_text = self.category_code_value.text().strip()
             company_id_text = self.company_code_value.text().strip()
             size_id_text = self.size_code_value.text().strip()
+            size_name = self.size_name_value.text().strip()
 
             if not category_id_text:
                 QMessageBox.warning(self, "Validation Error", "Please select a Category.")
@@ -903,25 +1166,28 @@ class Products(QMainWindow):
             if barcode and not barcode.strip():
                 barcode = None
 
+            # Image URL (Cloudinary) — None agar koi image nahi
+            image_url_value = self.image_url if self.image_url else None
+
             conn, cursor = db.get_connection()
             if product_id is None or product_id == "":
-                query = """INSERT INTO products (prd_id, prd_code, prd_name, prd_carton_size, 
+                query = """INSERT INTO products (prd_code, prd_name, prd_carton_size, 
                           prd_cost_price, prd_sale_price, prd_reorder, prd_barcode, prd_is_active, 
-                          prd_company_id, prd_cat_id, prd_size_id, company_name, cat_name) 
-                          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
-                values = (product_id, product_code, product_name, carton_size, unit_cost_price, 
+                          prd_company_id, prd_cat_id, prd_size_id, company_name, cat_name, image_url,prd_size_name) 
+                          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+                values = (product_code, product_name, carton_size, unit_cost_price, 
                          unit_sale_price, re_order, barcode, is_active, company_id, category_id, 
-                         size_id_val, company_name, cat_name)
+                         size_id_val, company_name, cat_name, image_url_value, size_name)
                 message = "Data Inserted Successfully."
             else:
                 query = """UPDATE products SET prd_code = %s, prd_name = %s, prd_carton_size = %s, 
                           prd_cost_price = %s, prd_sale_price = %s, prd_reorder = %s, prd_barcode = %s, 
                           prd_is_active = %s, prd_company_id = %s, prd_cat_id = %s, 
-                          prd_size_id = %s, company_name = %s, cat_name = %s 
+                          prd_size_id = %s, company_name = %s, cat_name = %s, image_url = %s, prd_size_name = %s
                           WHERE prd_id = %s"""
                 values = (product_code, product_name, carton_size, unit_cost_price, unit_sale_price, 
                          re_order, barcode, is_active, company_id, category_id, 
-                         size_id_val, company_name, cat_name, product_id)
+                         size_id_val, company_name, cat_name, self.image_url, size_name, product_id)
                 message = "Data Updated Successfully."
             
             cursor.execute(query, values)
@@ -1027,6 +1293,21 @@ class Products(QMainWindow):
     def add_new(self, sender_name):
         self.add_detail_window = AddDetails(sender_name)
         self.add_detail_window.show()
+
+    def closeEvent(self, event):
+        """Window band hone par agar upload chal raha ho to warn karo."""
+        if self._is_uploading:
+            reply = QMessageBox.question(
+                self, "Upload in Progress",
+                "Image upload ho rahi hai. Kya aap phir bhi band karna chahte hain?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+            if self._upload_worker is not None and self._upload_worker.isRunning():
+                self._upload_worker.wait(3000)
+        event.accept()
 
 
 class Suggestion(QWidget):
@@ -1455,8 +1736,8 @@ class AddDetails(QWidget):
                     query = 'UPDATE categories SET cat_description=%s, is_active = %s WHERE cat_code = %s'
                     values = (category_name, is_active, self.category_id)
                 else:
-                    query = """INSERT INTO categories (cat_code, cat_description, is_active) VALUES (%s, %s, %s)"""
-                    values = (self.category_id, category_name, is_active)
+                    query = """INSERT INTO categories ( cat_description, is_active) VALUES (%s, %s)"""
+                    values = (category_name, is_active)
                 cursor.execute(query, values)
                 conn.commit()
                 self.refresh_data()
@@ -1478,8 +1759,8 @@ class AddDetails(QWidget):
                     query = 'UPDATE prd_size SET size_name=%s, is_active = %s WHERE id = %s'
                     values = (size_name, is_active, self.size_id)
                 else:
-                    query = """INSERT INTO prd_size (id, size_name, is_active) VALUES (%s, %s, %s)"""
-                    values = (self.size_id, size_name, is_active)
+                    query = """INSERT INTO prd_size (size_name, is_active) VALUES (%s, %s)"""
+                    values = (size_name, is_active)
                 cursor.execute(query, values)
                 conn.commit()
                 self.refresh_data()
