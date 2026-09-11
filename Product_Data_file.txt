@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS products (
     prd_size_name VARCHAR(100),
     company_name VARCHAR(50) NOT NULL,
     cat_name VARCHAR(100) NOT NULL,
-    image_url VARCHAR(100)
+    image_url VARCHAR(100),
+    updated_at DATE DEFAULT (CURRENT_DATE)
 );
 
 
