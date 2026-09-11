@@ -3,6 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS customers (
     cus_code INT PRIMARY KEY AUTO_INCREMENT,
+    sync_uuid VARCHAR(50) NOT NULL,
     cus_name VARCHAR(100) NOT NULL,
     cus_email VARCHAR(100) NOT NULL UNIQUE,
     cus_address VARCHAR(200) NOT NULL,
@@ -15,7 +16,8 @@ CREATE TABLE IF NOT EXISTS customers (
     cus_credit_limit DECIMAL(10,2) DEFAULT 0,
     cus_whatsapp VARCHAR(20),
     phone varchar(100),
-    cus_date DATE DEFAULT (CURRENT_DATE)
+    cus_date DATE DEFAULT (CURRENT_DATE),
+    is_synced BOOLEAN DEFAULT TRUE
 );
 
 ================ DESCRIBE Customers =============
